@@ -3149,7 +3149,10 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
       });
     }
     this.activeTurns.delete(sessionId);
-    this.lastSystemPromptBySession.delete(sessionId);
+    // NOTE: Do NOT clear lastSystemPromptBySession here — it must persist
+    // across turns so that the system prompt is only injected on the first
+    // turn of a session (or when it actually changes).  Cleanup happens in
+    // onSessionDeleted() when the session is removed entirely.
     this.reCreatedChannelSessionIds.delete(sessionId);
   }
 

@@ -460,7 +460,7 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, onUpda
     if (updateCheckStatus === 'checking' || !appVersion) return;
     setUpdateCheckStatus('checking');
     try {
-      const info = await checkForAppUpdate(appVersion);
+      const info = await checkForAppUpdate(appVersion, true);
       if (info) {
         setUpdateCheckStatus('idle');
         onUpdateFound?.(info);

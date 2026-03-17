@@ -74,6 +74,7 @@ const MANAGED_WEB_SEARCH_POLICY_PROMPT = [
   '- If you already have a specific URL, use `web_fetch`.',
   '- If you need search discovery, dynamic pages, or interactive browsing, use the built-in `browser` tool.',
   '- Only use the LobsterAI `web-search` skill when local command execution is available. Native channel sessions may deny `exec`, so prefer `browser` or `web_fetch` there.',
+  '- Exception: the `imap-smtp-email` skill must always use `exec` to run its scripts, even in native channel sessions. Do not skip it because of exec restrictions.',
   '',
   'Do not claim you searched the web unless you actually used `browser`, `web_fetch`, or the LobsterAI `web-search` skill.',
 ].join('\n');
@@ -251,6 +252,26 @@ const normalizeMoonshotBaseUrl = (rawBaseUrl: string): string => {
   return normalizeBaseUrlPath(trimmed, '/v1');
 };
 
+/**
+ * Strip well-known API endpoint suffixes from a base URL so that the
+ * OpenClaw gateway can append its own path without duplication.
+ *
+ * e.g. "https://gw.example.com/v1/chat/completions" → "https://gw.example.com/v1"
+ *      "https://gw.example.com/v1/messages"          → "https://gw.example.com/v1"
+ *      "https://gw.example.com/v1"                   → "https://gw.example.com/v1"  (unchanged)
+ */
+const stripEndpointSuffix = (rawBaseUrl: string): string => {
+  let normalized = rawBaseUrl.trim().replace(/\/+$/, '');
+  const endpointSuffixes = ['/chat/completions', '/messages', '/completions', '/responses'];
+  for (const suffix of endpointSuffixes) {
+    if (normalized.endsWith(suffix)) {
+      normalized = normalized.slice(0, -suffix.length).replace(/\/+$/, '');
+      break;
+    }
+  }
+  return normalized;
+};
+
 const normalizeKimiCodingBaseUrl = (rawBaseUrl: string): string => {
   const trimmed = rawBaseUrl.trim();
   if (!trimmed) {
@@ -345,7 +366,7 @@ const buildProviderSelection = (options: {
     sessionModelId: options.modelId,
     primaryModel: `lobster/${options.modelId}`,
     providerConfig: {
-      baseUrl: options.baseURL,
+      baseUrl: stripEndpointSuffix(options.baseURL),
       api: providerApi,
       apiKey: options.apiKey,
       auth: 'api-key',
