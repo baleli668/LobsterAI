@@ -3,7 +3,8 @@ import { useSelector } from 'react-redux';
 import { RootState } from '../../store';
 import { i18nService } from '../../services/i18n';
 import { skillService } from '../../services/skill';
-import { CheckIcon, MagnifyingGlassIcon } from '@heroicons/react/24/outline';
+import { CheckIcon } from '@heroicons/react/24/outline';
+import SearchIcon from '../icons/SearchIcon';
 
 interface AgentSkillSelectorProps {
   selectedSkillIds: string[];
@@ -51,7 +52,7 @@ const AgentSkillSelector: React.FC<AgentSkillSelectorProps> = ({ selectedSkillId
       {enabledSkills.length > 5 && (
         <div className="mb-2">
           <div className="relative">
-            <MagnifyingGlassIcon className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-secondary/50" />
+            <SearchIcon className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-secondary/50" />
             <input
               type="text"
               value={search}
