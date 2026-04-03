@@ -1664,8 +1664,27 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, onUpda
     setActiveTab(tab);
   };
 
+  // Mapping from shortcut key to i18n label key for conflict messages
+  const shortcutLabelMap: Record<string, string> = {
+    newChat: 'newChat',
+    search: 'search',
+    settings: 'openSettings',
+    sendMessage: 'sendMessageShortcut',
+  };
+
   // 快捷键更新处理
   const handleShortcutChange = (key: keyof typeof shortcuts, value: string) => {
+    // Check for conflicts with other shortcuts
+    const conflictKey = Object.keys(shortcuts).find(
+      k => k !== key && shortcuts[k as keyof typeof shortcuts] === value
+    );
+    if (conflictKey) {
+      const conflictLabel = i18nService.t(shortcutLabelMap[conflictKey] ?? conflictKey);
+      setNoticeMessage(
+        i18nService.t('shortcutConflict').replace('{0}', value).replace('{1}', conflictLabel)
+      );
+      return;
+    }
     setShortcuts(prev => ({
       ...prev,
       [key]: value
