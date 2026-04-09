@@ -744,7 +744,7 @@ const CoworkPromptInput = React.forwardRef<CoworkPromptInputRef, CoworkPromptInp
   return (
     <div className="relative">
       {attachments.length > 0 && (
-        <div className="mb-2 flex flex-wrap gap-2">
+        <div className="mb-2 flex flex-wrap gap-2 max-h-[136px] overflow-y-auto">
           {attachments.map((attachment) => (
             <AttachmentCard
               key={attachment.path}
