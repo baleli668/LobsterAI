@@ -386,6 +386,12 @@ contextBridge.exposeInMainWorld('electron', {
     setFeishuInstanceConfig: (instanceId: string, config: any, options?: { syncGateway?: boolean }) =>
       ipcRenderer.invoke('im:feishu:instance:config:set', instanceId, config, options),
 
+    // Email Multi-Instance
+    addEmailInstance: (name: string) => ipcRenderer.invoke('im:email:instance:add', name),
+    deleteEmailInstance: (instanceId: string) => ipcRenderer.invoke('im:email:instance:delete', instanceId),
+    setEmailInstanceConfig: (instanceId: string, config: any, options?: { syncGateway?: boolean }) =>
+      ipcRenderer.invoke('im:email:instance:config:set', instanceId, config, options),
+
     // Event listeners
     onStatusChange: (callback: (status: any) => void) => {
       const handler = (_event: any, status: any) => callback(status);

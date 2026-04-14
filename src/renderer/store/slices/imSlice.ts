@@ -24,6 +24,8 @@ import type {
   PopoOpenClawConfig,
   WeixinOpenClawConfig,
   IMSettings,
+  EmailInstanceConfig,
+  EmailMultiInstanceConfig,
 } from '../../types/im';
 import {
   DEFAULT_IM_CONFIG,
@@ -153,6 +155,24 @@ const imSlice = createSlice({
     setWeixinConfig: (state, action: PayloadAction<Partial<WeixinOpenClawConfig>>) => {
       state.config.weixin = { ...state.config.weixin, ...action.payload };
     },
+    setEmailInstances: (state, action: PayloadAction<EmailInstanceConfig[]>) => {
+      state.config.email = { instances: action.payload };
+    },
+    setEmailMultiInstanceConfig: (state, action: PayloadAction<EmailMultiInstanceConfig>) => {
+      state.config.email = action.payload;
+    },
+    setEmailInstanceConfig: (state, action: PayloadAction<{ instanceId: string; config: Partial<EmailInstanceConfig> }>) => {
+      const inst = state.config.email.instances.find(i => i.instanceId === action.payload.instanceId);
+      if (inst) Object.assign(inst, action.payload.config);
+    },
+    addEmailInstance: (state, action: PayloadAction<EmailInstanceConfig>) => {
+      state.config.email.instances.push(action.payload);
+    },
+    removeEmailInstance: (state, action: PayloadAction<string>) => {
+      state.config.email.instances = state.config.email.instances.filter(
+        i => i.instanceId !== action.payload,
+      );
+    },
     setIMSettings: (state, action: PayloadAction<Partial<IMSettings>>) => {
       state.config.settings = { ...state.config.settings, ...action.payload };
     },
@@ -198,6 +218,11 @@ export const {
   setWecomConfig,
   setPopoConfig,
   setWeixinConfig,
+  setEmailInstances,
+  setEmailMultiInstanceConfig,
+  setEmailInstanceConfig,
+  addEmailInstance,
+  removeEmailInstance,
   setIMSettings,
   setStatus,
   setLoading,

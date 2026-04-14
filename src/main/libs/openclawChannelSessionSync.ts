@@ -7,7 +7,7 @@
 
 import type { CoworkStore } from '../coworkStore';
 import type { IMStore } from '../im/imStore';
-import type { Platform, EmailMultiInstanceConfig } from '../im/types';
+import type { Platform } from '../im/types';
 import { PlatformRegistry } from '../../shared/platform';
 import { t } from '../i18n';
 import { session } from '@electron/remote';
@@ -197,7 +197,7 @@ export function extractAccountIdFromKey(sessionKey: string): string | null {
   return null;
 }
 
-const MULTI_INSTANCE_PLATFORMS = new Set<Platform>(['dingtalk', 'feishu', 'qq']);
+const MULTI_INSTANCE_PLATFORMS = new Set<Platform>(['dingtalk', 'feishu', 'qq', 'email']);
 
 /**
  * Resolve the agent binding for a platform, supporting per-instance bindings.
@@ -297,9 +297,6 @@ export class OpenClawChannelSessionSync {
    * into the new session — only future incremental messages will appear.
    */
   private readonly agentChangedSessionIds = new Set<string>();
-
-  private cachedEmailConfig: EmailMultiInstanceConfig | null = null;
-  private emailConfigCacheExpiry = 0;
 
   constructor(deps: ChannelSessionSyncDeps) {
     this.coworkStore = deps.coworkStore;
@@ -443,27 +440,6 @@ export class OpenClawChannelSessionSync {
       this.imStore.deleteSessionMapping(parsed.conversationId, parsed.platform);
     }
 
-    // Email channel: resolve agent from account config
-    let agentId = 'main';
-    if (parsed.platform === 'email') {
-      // Cache email config for 60 seconds to avoid repeated DB reads
-      if (!this.cachedEmailConfig || Date.now() > this.emailConfigCacheExpiry) {
-        this.cachedEmailConfig = this.imStore.getEmailConfig();
-        this.emailConfigCacheExpiry = Date.now() + 60_000;
-      }
-
-      // Extract accountId from sessionKey: agent:{agentId}:email:{accountId}:{threadId}
-      const parts = sessionKey.split(':');
-      const emailIndex = parts.indexOf('email');
-      if (emailIndex !== -1 && emailIndex < parts.length - 2) {
-        const accountId = parts[emailIndex + 1];
-        const instance = this.cachedEmailConfig.instances.find(i => i.instanceId === accountId);
-        if (instance?.agentId) {
-          agentId = instance.agentId;
-        }
-      }
-    }
-
     // 5. Create new Cowork session
     const titlePrefix = getChannelTitlePrefix(parsed.platform);
     // For conversationIds that look like email addresses (e.g. POPO),
@@ -475,12 +451,9 @@ export class OpenClawChannelSessionSync {
     const title = `${titlePrefix} ${shortId}`;
     const cwd = this.getDefaultCwd();
     // Look up the per-platform agent binding so the session is filed under the correct agent.
-    // For non-email platforms, use platform agent bindings. Email already resolved agentId above.
-    if (parsed.platform !== 'email') {
-      const imSettings = this.imStore.getIMSettings();
-      const accountId = extractAccountIdFromKey(sessionKey);
-      agentId = resolveAgentBinding(imSettings.platformAgentBindings, parsed.platform, accountId);
-    }
+    const imSettings = this.imStore.getIMSettings();
+    const accountId = extractAccountIdFromKey(sessionKey);
+    const agentId = resolveAgentBinding(imSettings.platformAgentBindings, parsed.platform, accountId);
     console.log(
       '[ChannelSessionSync] creating new cowork session: title=',
       title,

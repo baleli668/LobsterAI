@@ -9,10 +9,10 @@ import { SignalIcon, XMarkIcon, CheckCircleIcon, XCircleIcon, ExclamationTriangl
 import { EyeIcon, EyeSlashIcon, XCircleIcon as XCircleIconSolid } from '@heroicons/react/20/solid';
 import { RootState } from '../../store';
 import { imService } from '../../services/im';
-import { setDingTalkConfig, setDingTalkInstanceConfig, setFeishuConfig, setFeishuInstanceConfig, setTelegramOpenClawConfig, setQQConfig, setQQInstanceConfig, setDiscordConfig, setNimConfig, setNeteaseBeeChanConfig, setWecomConfig, setWeixinConfig, setPopoConfig, clearError } from '../../store/slices/imSlice';
+import { setDingTalkConfig, setDingTalkInstanceConfig, setFeishuConfig, setFeishuInstanceConfig, setTelegramOpenClawConfig, setQQConfig, setQQInstanceConfig, setDiscordConfig, setNimConfig, setNeteaseBeeChanConfig, setWecomConfig, setWeixinConfig, setPopoConfig, setEmailInstanceConfig, clearError } from '../../store/slices/imSlice';
 import { i18nService } from '../../services/i18n';
-import type { IMConnectivityCheck, IMConnectivityTestResult, IMGatewayConfig, TelegramOpenClawConfig, DiscordOpenClawConfig, WecomOpenClawConfig, PopoOpenClawConfig } from '../../types/im';
-import { MAX_QQ_INSTANCES, MAX_FEISHU_INSTANCES, MAX_DINGTALK_INSTANCES } from '../../types/im';
+import type { IMConnectivityCheck, IMConnectivityTestResult, IMGatewayConfig, TelegramOpenClawConfig, DiscordOpenClawConfig, WecomOpenClawConfig, PopoOpenClawConfig, EmailInstanceConfig } from '../../types/im';
+import { MAX_QQ_INSTANCES, MAX_FEISHU_INSTANCES, MAX_DINGTALK_INSTANCES, MAX_EMAIL_INSTANCES } from '../../types/im';
 import QQInstanceSettings from './QQInstanceSettings';
 import FeishuInstanceSettings from './FeishuInstanceSettings';
 import DingTalkInstanceSettings from './DingTalkInstanceSettings';
@@ -111,6 +111,9 @@ const IMSettings: React.FC = () => {
   const [feishuExpanded, setFeishuExpanded] = useState(false);
   const [activeDingTalkInstanceId, setActiveDingTalkInstanceId] = useState<string | null>(null);
   const [dingtalkExpanded, setDingtalkExpanded] = useState(false);
+  const [emailExpanded, setEmailExpanded] = useState(false);
+  const [activeEmailInstanceId, setActiveEmailInstanceId] = useState<string | null>(null);
+  const [emailTesting, setEmailTesting] = useState(false);
   const [testingPlatform, setTestingPlatform] = useState<Platform | null>(null);
   const [connectivityResults, setConnectivityResults] = useState<Partial<Record<Platform, IMConnectivityTestResult>>>({});
   const [connectivityModalPlatform, setConnectivityModalPlatform] = useState<Platform | null>(null);
@@ -549,10 +552,62 @@ const IMSettings: React.FC = () => {
       return;
     }
 
+    // For Email, save the full email multi-instance config
+    if (activePlatform === 'email') {
+      await imService.persistConfig({ email: config.email ?? { instances: [] } });
+      return;
+    }
+
     await imService.persistConfig({ [activePlatform]: config[activePlatform] });
   };
 
+  // ==================== Email instance helpers ====================
 
+  const handleEmailDeleteInstance = async (instanceId: string) => {
+    const instance = config.email.instances.find(i => i.instanceId === instanceId);
+    if (!instance) return;
+    const confirmed = window.confirm(
+      i18nService.t('emailDeleteConfirm').replace('{name}', instance.instanceName),
+    );
+    if (!confirmed) return;
+    await imService.deleteEmailInstance(instanceId);
+    const remaining = config.email.instances.filter(i => i.instanceId !== instanceId);
+    setActiveEmailInstanceId(remaining.length > 0 ? remaining[0].instanceId : null);
+  };
+
+  const handleEmailTestConnection = async () => {
+    if (!activeEmailInstanceId) return;
+    setEmailTesting(true);
+    try {
+      const result = await window.electron.im.testGateway('email');
+      if (result.success) {
+        alert(i18nService.t('emailTestSuccess'));
+      } else {
+        alert(i18nService.t('emailTestFailed').replace('{error}', result.error || 'Unknown error'));
+      }
+    } catch (error) {
+      alert(
+        i18nService.t('emailTestFailed').replace(
+          '{error}',
+          error instanceof Error ? error.message : String(error),
+        ),
+      );
+    } finally {
+      setEmailTesting(false);
+    }
+  };
+
+  const handleEmailGetApiKey = async () => {
+    if (!activeEmailInstanceId) return;
+    const apiKeyUrl = 'https://claw.163.com/projects/dashboard/#/api-keys';
+    try {
+      await window.electron.shell.openExternal(apiKeyUrl);
+    } catch {
+      alert('Failed to open browser. Please visit: ' + apiKeyUrl);
+    }
+  };
+
+  // ==================== End email instance helpers ====================
 
   const getCheckTitle = (code: IMConnectivityCheck['code']): string => {
     return i18nService.t(`imConnectivityCheckTitle_${code}`);
@@ -644,6 +699,11 @@ const IMSettings: React.FC = () => {
         return;
       }
 
+      if (platform === 'email') {
+        // Email multi-instance: toggle is handled per-instance in EmailSettings
+        return;
+      }
+
       if (platform === 'wecom') {
         const newEnabled = !wecomOpenClawConfig.enabled;
         const success = await imService.updateConfig({ wecom: { ...wecomOpenClawConfig, enabled: newEnabled } });
@@ -729,6 +789,7 @@ const IMSettings: React.FC = () => {
   const wecomConnected = status.wecom?.connected ?? false;
   const weixinConnected = status.weixin?.connected ?? false;
   const popoConnected = status.popo?.connected ?? false;
+  const emailConnected = status.email.instances.some(i => i.connected);
 
   // Compute visible platforms based on language
   const platforms = useMemo<Platform[]>(() => {
@@ -790,6 +851,9 @@ const IMSettings: React.FC = () => {
     if (platform === 'feishu') {
       return config.feishu.instances?.some(i => i.enabled);
     }
+    if (platform === 'email') {
+      return config.email.instances.some(i => i.enabled);
+    }
     return (config[platform] as { enabled: boolean }).enabled;
   };
 
@@ -804,6 +868,7 @@ const IMSettings: React.FC = () => {
     if (platform === 'wecom') return wecomConnected;
     if (platform === 'weixin') return weixinConnected;
     if (platform === 'popo') return popoConnected;
+    if (platform === 'email') return emailConnected;
     return feishuConnected;
   };
 
@@ -984,6 +1049,7 @@ const IMSettings: React.FC = () => {
       wecom: setWecomConfig,
       weixin: setWeixinConfig,
       popo: setPopoConfig,
+      email: null, // Email is multi-instance; toggle handled per-instance in EmailSettings
     };
     return actionMap[platform];
   };
@@ -1234,6 +1300,72 @@ const IMSettings: React.FC = () => {
             );
           }
 
+          if (platform === 'email') {
+            return (
+              <div key="email">
+                {/* Email Platform Header - clickable to expand/collapse */}
+                <div
+                  onClick={() => { setActivePlatform('email'); setActiveEmailInstanceId(null); setEmailExpanded(!emailExpanded); }}
+                  className={`flex items-center p-2 rounded-xl cursor-pointer transition-colors ${
+                    activePlatform === 'email'
+                      ? 'bg-primary-muted border border-primary shadow-subtle'
+                      : 'bg-surface hover:bg-surface-raised border border-transparent'
+                  }`}
+                >
+                  <div className="flex flex-1 items-center">
+                    <div className="mr-2 flex h-7 w-7 items-center justify-center">
+                      <img src={PlatformRegistry.logo('email')} alt="Email" className="w-6 h-6 object-contain rounded-md" />
+                    </div>
+                    <span className={`text-sm font-medium truncate ${activePlatform === 'email' ? 'text-primary' : 'text-foreground'}`}>
+                      {i18nService.t('email')}
+                    </span>
+                  </div>
+                  <span className="text-xs opacity-50">{emailExpanded ? '\u25BC' : '\u25B6'}</span>
+                </div>
+                {/* Email Instance Sub-items */}
+                {emailExpanded && (
+                  <div className="ml-5 mt-1 space-y-1">
+                    {config.email.instances.map((inst) => {
+                      const instStatus = status.email.instances.find(s => s.instanceId === inst.instanceId);
+                      const isSelected = activePlatform === 'email' && activeEmailInstanceId === inst.instanceId;
+                      const dotColor = !inst.enabled ? 'bg-gray-400' : (instStatus?.connected ? 'bg-green-500' : 'bg-yellow-500');
+                      return (
+                        <div
+                          key={inst.instanceId}
+                          onClick={() => { setActivePlatform('email'); setActiveEmailInstanceId(inst.instanceId); }}
+                          className={`flex items-center p-1.5 pl-2 rounded-lg cursor-pointer transition-colors text-sm ${
+                            isSelected
+                              ? 'bg-primary/10 dark:bg-primary/20'
+                              : 'hover:bg-surface-raised'
+                          }`}
+                        >
+                          <span className={`w-2 h-2 rounded-full ${dotColor} mr-2 flex-shrink-0`} />
+                          <span className={`truncate flex-1 ${isSelected ? 'text-primary font-medium' : 'text-foreground'}`}>
+                            {inst.instanceName}
+                          </span>
+                        </div>
+                      );
+                    })}
+                    {/* Add account button */}
+                    <button
+                      type="button"
+                      disabled={config.email.instances.length >= MAX_EMAIL_INSTANCES}
+                      onClick={async (e) => {
+                        e.stopPropagation();
+                        const inst = await imService.addEmailInstance(`Email ${config.email.instances.length + 1}`);
+                        if (inst) { setActivePlatform('email'); setActiveEmailInstanceId(inst.instanceId); setEmailExpanded(true); }
+                      }}
+                      className="w-full flex items-center p-1.5 pl-2 rounded-lg text-sm text-secondary hover:bg-surface-raised disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                    >
+                      <span className="mr-1">+</span>
+                      {i18nService.t('imEmailAddInstance')}
+                    </button>
+                  </div>
+                )}
+              </div>
+            );
+          }
+
           return (
             <div
               key={platform}
@@ -1287,7 +1419,7 @@ const IMSettings: React.FC = () => {
       {/* Platform Settings - Right Side */}
       <div className="flex-1 min-w-0 pl-4 pr-2 space-y-4 overflow-y-auto [scrollbar-gutter:stable]">
         {/* Header with status (hidden for QQ which has per-instance headers) */}
-        {activePlatform !== 'qq' && activePlatform !== 'feishu' && activePlatform !== 'dingtalk' && (
+        {activePlatform !== 'qq' && activePlatform !== 'feishu' && activePlatform !== 'dingtalk' && activePlatform !== 'email' && (
         <div className="flex items-center gap-3 pb-3 border-b border-border-subtle">
           <div className="flex items-center gap-2">
              <div className="flex h-7 w-7 items-center justify-center rounded-md bg-surface border border-border-subtle p-1">
@@ -1526,6 +1658,307 @@ const IMSettings: React.FC = () => {
               connectivityResults={connectivityResults}
               language={language}
             />
+          );
+        })()}
+
+        {/* Email Settings (multi-instance, inline form like feishu/qq) */}
+        {activePlatform === 'email' && !activeEmailInstanceId && (
+          <div className="flex flex-col items-center justify-center py-12 text-center">
+            <img src={PlatformRegistry.logo('email')} alt="Email" className="w-12 h-12 object-contain rounded-md mb-4 opacity-50" />
+            <p className="text-sm text-secondary mb-4">
+              {config.email.instances.length === 0
+                ? i18nService.t('imEmailNoInstances')
+                : i18nService.t('imEmailSelectInstance')}
+            </p>
+            {config.email.instances.length < MAX_EMAIL_INSTANCES && (
+              <button
+                type="button"
+                onClick={async (e) => {
+                  e.stopPropagation();
+                  const inst = await imService.addEmailInstance(`Email ${config.email.instances.length + 1}`);
+                  if (inst) { setActivePlatform('email'); setActiveEmailInstanceId(inst.instanceId); setEmailExpanded(true); }
+                }}
+                className="px-4 py-2 rounded-lg text-sm font-medium bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
+              >
+                + {i18nService.t('imEmailAddInstance')}
+              </button>
+            )}
+          </div>
+        )}
+        {activePlatform === 'email' && activeEmailInstanceId && (() => {
+          const inst = config.email.instances.find(i => i.instanceId === activeEmailInstanceId);
+          if (!inst) return null;
+          const instStatus = status.email.instances.find(s => s.instanceId === inst.instanceId);
+          const inputClass = 'block w-full rounded-lg bg-surface border border-border-subtle focus:border-primary focus:ring-1 focus:ring-primary/30 text-foreground px-3 py-2 text-sm transition-colors';
+          const labelClass = 'block text-xs font-medium text-secondary mb-1';
+          return (
+            <div className="space-y-4">
+              {/* Instance header */}
+              <div className="flex items-center gap-3 pb-3 border-b border-border-subtle">
+                <div className="flex items-center gap-2">
+                  <div className="flex h-7 w-7 items-center justify-center rounded-md bg-surface border border-border-subtle p-1">
+                    <img src={PlatformRegistry.logo('email')} alt="Email" className="w-4 h-4 object-contain rounded" />
+                  </div>
+                  <h3 className="text-sm font-medium text-foreground">{inst.instanceName}</h3>
+                </div>
+                <div className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+                  instStatus?.connected
+                    ? 'bg-green-500/15 text-green-600 dark:text-green-400'
+                    : 'bg-gray-500/15 text-gray-500 dark:text-gray-400'
+                }`}>
+                  {instStatus?.connected ? i18nService.t('emailConnected') : i18nService.t('emailDisconnected')}
+                </div>
+              </div>
+
+              {/* Instance Name */}
+              <div>
+                <label className={labelClass}>{i18nService.t('emailInstanceName')}</label>
+                <input
+                  type="text"
+                  value={inst.instanceName}
+                  onChange={e => dispatch(setEmailInstanceConfig({ instanceId: inst.instanceId, config: { instanceName: e.target.value } }))}
+                  onBlur={e => void imService.persistEmailInstanceConfig(inst.instanceId, { instanceName: e.target.value })}
+                  placeholder={i18nService.t('emailInstanceNamePlaceholder')}
+                  className={inputClass}
+                />
+              </div>
+
+              {/* Transport Mode */}
+              <div>
+                <label className={labelClass}>{i18nService.t('emailTransportMode')}</label>
+                <div className="flex gap-4">
+                  <label className="flex items-center gap-1.5 text-sm text-foreground cursor-pointer">
+                    <input
+                      type="radio"
+                      checked={inst.transport === 'imap'}
+                      onChange={() => {
+                        dispatch(setEmailInstanceConfig({ instanceId: inst.instanceId, config: { transport: 'imap' } }));
+                        void imService.persistEmailInstanceConfig(inst.instanceId, { transport: 'imap' });
+                      }}
+                      className="accent-primary"
+                    />
+                    {i18nService.t('emailTransportImap')}
+                  </label>
+                  <label className="flex items-center gap-1.5 text-sm text-foreground cursor-pointer">
+                    <input
+                      type="radio"
+                      checked={inst.transport === 'ws'}
+                      onChange={() => {
+                        dispatch(setEmailInstanceConfig({ instanceId: inst.instanceId, config: { transport: 'ws' } }));
+                        void imService.persistEmailInstanceConfig(inst.instanceId, { transport: 'ws' });
+                      }}
+                      className="accent-primary"
+                    />
+                    {i18nService.t('emailTransportWs')}
+                  </label>
+                </div>
+              </div>
+
+              {/* Email Address */}
+              <div>
+                <label className={labelClass}>{i18nService.t('emailAddress')}</label>
+                <input
+                  type="email"
+                  value={inst.email}
+                  onChange={e => dispatch(setEmailInstanceConfig({ instanceId: inst.instanceId, config: { email: e.target.value } }))}
+                  onBlur={e => void imService.persistEmailInstanceConfig(inst.instanceId, { email: e.target.value })}
+                  placeholder={i18nService.t('emailAddressPlaceholder')}
+                  className={inputClass}
+                />
+              </div>
+
+              {/* IMAP mode fields */}
+              {inst.transport === 'imap' && (
+                <>
+                  <div>
+                    <label className={labelClass}>{i18nService.t('emailPassword')}</label>
+                    <input
+                      type="password"
+                      value={inst.password || ''}
+                      onChange={e => dispatch(setEmailInstanceConfig({ instanceId: inst.instanceId, config: { password: e.target.value } }))}
+                      onBlur={e => void imService.persistEmailInstanceConfig(inst.instanceId, { password: e.target.value })}
+                      placeholder={i18nService.t('emailPasswordPlaceholder')}
+                      className={inputClass}
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className={labelClass}>{i18nService.t('emailImapHost')}</label>
+                      <input
+                        type="text"
+                        value={inst.imapHost || ''}
+                        onChange={e => dispatch(setEmailInstanceConfig({ instanceId: inst.instanceId, config: { imapHost: e.target.value } }))}
+                        onBlur={e => void imService.persistEmailInstanceConfig(inst.instanceId, { imapHost: e.target.value })}
+                        placeholder="imap.example.com"
+                        className={inputClass}
+                      />
+                    </div>
+                    <div>
+                      <label className={labelClass}>{i18nService.t('emailImapPort')}</label>
+                      <input
+                        type="number"
+                        value={inst.imapPort ?? ''}
+                        onChange={e => dispatch(setEmailInstanceConfig({ instanceId: inst.instanceId, config: { imapPort: parseInt(e.target.value) || undefined } }))}
+                        onBlur={e => void imService.persistEmailInstanceConfig(inst.instanceId, { imapPort: parseInt(e.target.value) || undefined })}
+                        placeholder="993"
+                        className={inputClass}
+                      />
+                    </div>
+                    <div>
+                      <label className={labelClass}>{i18nService.t('emailSmtpHost')}</label>
+                      <input
+                        type="text"
+                        value={inst.smtpHost || ''}
+                        onChange={e => dispatch(setEmailInstanceConfig({ instanceId: inst.instanceId, config: { smtpHost: e.target.value } }))}
+                        onBlur={e => void imService.persistEmailInstanceConfig(inst.instanceId, { smtpHost: e.target.value })}
+                        placeholder="smtp.example.com"
+                        className={inputClass}
+                      />
+                    </div>
+                    <div>
+                      <label className={labelClass}>{i18nService.t('emailSmtpPort')}</label>
+                      <input
+                        type="number"
+                        value={inst.smtpPort ?? ''}
+                        onChange={e => dispatch(setEmailInstanceConfig({ instanceId: inst.instanceId, config: { smtpPort: parseInt(e.target.value) || undefined } }))}
+                        onBlur={e => void imService.persistEmailInstanceConfig(inst.instanceId, { smtpPort: parseInt(e.target.value) || undefined })}
+                        placeholder="465"
+                        className={inputClass}
+                      />
+                    </div>
+                  </div>
+                  <p className="text-xs text-secondary">{i18nService.t('emailServerConfigHint')}</p>
+                </>
+              )}
+
+              {/* WS mode fields */}
+              {inst.transport === 'ws' && (
+                <div>
+                  <label className={labelClass}>{i18nService.t('emailApiKey')}</label>
+                  <div className="flex gap-2">
+                    <input
+                      type="password"
+                      value={inst.apiKey || ''}
+                      onChange={e => dispatch(setEmailInstanceConfig({ instanceId: inst.instanceId, config: { apiKey: e.target.value } }))}
+                      onBlur={e => void imService.persistEmailInstanceConfig(inst.instanceId, { apiKey: e.target.value })}
+                      placeholder={i18nService.t('emailApiKeyPlaceholder')}
+                      className={`${inputClass} flex-1`}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => void handleEmailGetApiKey()}
+                      className="px-3 py-2 rounded-lg text-xs font-medium bg-primary/10 text-primary hover:bg-primary/20 transition-colors whitespace-nowrap"
+                    >
+                      {i18nService.t('getApiKey')}
+                    </button>
+                  </div>
+                  <p className="text-xs text-secondary mt-1">{i18nService.t('apiKeyHint')}</p>
+                </div>
+              )}
+
+              {/* Allow From (whitelist) */}
+              <div>
+                <label className={labelClass}>{i18nService.t('emailAllowFrom')}</label>
+                <input
+                  type="text"
+                  value={(inst.allowFrom ?? []).join(', ')}
+                  onChange={e => dispatch(setEmailInstanceConfig({
+                    instanceId: inst.instanceId,
+                    config: { allowFrom: e.target.value.split(',').map(s => s.trim()).filter(Boolean) },
+                  }))}
+                  onBlur={e => void imService.persistEmailInstanceConfig(inst.instanceId, {
+                    allowFrom: e.target.value.split(',').map(s => s.trim()).filter(Boolean),
+                  })}
+                  placeholder={i18nService.t('emailAllowFromPlaceholder')}
+                  className={inputClass}
+                />
+                <p className="text-xs text-secondary mt-1">{i18nService.t('emailAllowFromHint')}</p>
+              </div>
+
+              {/* Reply Mode */}
+              <div>
+                <label className={labelClass}>{i18nService.t('emailReplyMode')}</label>
+                <select
+                  value={inst.replyMode ?? 'complete'}
+                  onChange={e => {
+                    const replyMode = e.target.value as EmailInstanceConfig['replyMode'];
+                    dispatch(setEmailInstanceConfig({ instanceId: inst.instanceId, config: { replyMode } }));
+                    void imService.persistEmailInstanceConfig(inst.instanceId, { replyMode });
+                  }}
+                  className={inputClass}
+                >
+                  <option value="immediate">{i18nService.t('emailReplyModeImmediate')}</option>
+                  <option value="accumulated">{i18nService.t('emailReplyModeAccumulated')}</option>
+                  <option value="complete">{i18nService.t('emailReplyModeComplete')}</option>
+                </select>
+              </div>
+
+              {/* Reply To */}
+              <div>
+                <label className={labelClass}>{i18nService.t('emailReplyTo')}</label>
+                <div className="flex gap-4">
+                  <label className="flex items-center gap-1.5 text-sm text-foreground cursor-pointer">
+                    <input
+                      type="radio"
+                      checked={inst.replyTo === 'sender' || !inst.replyTo}
+                      onChange={() => {
+                        dispatch(setEmailInstanceConfig({ instanceId: inst.instanceId, config: { replyTo: 'sender' } }));
+                        void imService.persistEmailInstanceConfig(inst.instanceId, { replyTo: 'sender' });
+                      }}
+                      className="accent-primary"
+                    />
+                    {i18nService.t('emailReplyToSender')}
+                  </label>
+                  <label className="flex items-center gap-1.5 text-sm text-foreground cursor-pointer">
+                    <input
+                      type="radio"
+                      checked={inst.replyTo === 'all'}
+                      onChange={() => {
+                        dispatch(setEmailInstanceConfig({ instanceId: inst.instanceId, config: { replyTo: 'all' } }));
+                        void imService.persistEmailInstanceConfig(inst.instanceId, { replyTo: 'all' });
+                      }}
+                      className="accent-primary"
+                    />
+                    {i18nService.t('emailReplyToAll')}
+                  </label>
+                </div>
+              </div>
+
+              {/* Enabled toggle */}
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-medium text-secondary">{i18nService.t('emailEnabledLabel')}</label>
+                <div
+                  onClick={() => {
+                    const newEnabled = !inst.enabled;
+                    dispatch(setEmailInstanceConfig({ instanceId: inst.instanceId, config: { enabled: newEnabled } }));
+                    void imService.persistEmailInstanceConfig(inst.instanceId, { enabled: newEnabled });
+                  }}
+                  className={`w-10 h-5 rounded-full flex items-center cursor-pointer transition-colors ${inst.enabled ? 'bg-primary' : 'bg-gray-300 dark:bg-gray-600'}`}
+                >
+                  <div className={`w-4 h-4 rounded-full bg-white shadow-md transform transition-transform ${inst.enabled ? 'translate-x-5' : 'translate-x-0.5'}`} />
+                </div>
+              </div>
+
+              {/* Bottom action bar */}
+              <div className="flex items-center gap-2 pt-4 border-t border-border-subtle">
+                <button
+                  type="button"
+                  onClick={() => void handleEmailTestConnection()}
+                  disabled={(inst.transport === 'ws' ? !inst.apiKey : !inst.email) || emailTesting}
+                  className="inline-flex items-center px-3 py-1.5 text-xs font-medium rounded-xl border border-border text-foreground hover:bg-surface-raised disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  <SignalIcon className="h-3.5 w-3.5 mr-1.5" />
+                  {emailTesting ? i18nService.t('imConnectivityTesting') : i18nService.t('testConnection')}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleEmailDeleteInstance(inst.instanceId)}
+                  className="ml-auto px-3 py-1.5 rounded-xl text-xs font-medium text-red-600 dark:text-red-400 hover:bg-red-500/10 transition-colors"
+                >
+                  {i18nService.t('delete')}
+                </button>
+              </div>
+            </div>
           );
         })()}
 

@@ -591,6 +591,7 @@ export class IMStore {
     const popo = this.getConfigValue<PopoOpenClawConfig>('popo') ?? DEFAULT_POPO_CONFIG;
     const weixin = this.getConfigValue<WeixinOpenClawConfig>('weixin') ?? DEFAULT_WEIXIN_CONFIG;
     const settings = this.getConfigValue<IMSettings>('settings') ?? DEFAULT_IM_SETTINGS;
+    const email = this.getEmailConfig();
 
     // Resolve enabled field: default to false for safety
     // User must explicitly enable the service by setting enabled: true
@@ -614,6 +615,7 @@ export class IMStore {
       wecom: resolveEnabled(wecom, DEFAULT_WECOM_CONFIG),
       popo: resolveEnabled(popo, DEFAULT_POPO_CONFIG),
       weixin: resolveEnabled(weixin, DEFAULT_WEIXIN_CONFIG),
+      email,
       settings: { ...DEFAULT_IM_SETTINGS, ...settings },
     };
   }
@@ -648,6 +650,9 @@ export class IMStore {
     }
     if (config.weixin) {
       this.setWeixinConfig(config.weixin);
+    }
+    if (config.email) {
+      this.setEmailConfig(config.email);
     }
     if (config.settings) {
       this.setIMSettings(config.settings);
@@ -1027,9 +1032,32 @@ export class IMStore {
    * Set email channel multi-instance configuration
    */
   setEmailConfig(config: EmailMultiInstanceConfig): void {
+    this.setConfigValue('email', config);
+  }
+
+  setEmailInstanceConfig(instanceId: string, config: Partial<EmailInstanceConfig>): void {
+    const current = this.getEmailConfig();
+    const existing = current.instances.find(i => i.instanceId === instanceId);
+    if (existing) {
+      const updated = current.instances.map(i =>
+        i.instanceId === instanceId ? { ...i, ...config } : i,
+      );
+      this.setEmailConfig({ instances: updated });
+    } else {
+      this.setEmailConfig({
+        instances: [...current.instances, { ...DEFAULT_EMAIL_INSTANCE_CONFIG, ...config, instanceId } as EmailInstanceConfig],
+      });
+    }
+  }
+
+  deleteEmailInstance(instanceId: string): void {
+    const current = this.getEmailConfig();
+    const updated = current.instances.filter(i => i.instanceId !== instanceId);
+    this.setEmailConfig({ instances: updated });
+    // Clean up session mappings for this instance
     this.db
-      .prepare('INSERT OR REPLACE INTO im_config (key, value) VALUES (?, ?)')
-      .run('email', JSON.stringify(config));
+      .prepare('DELETE FROM im_session_mappings WHERE platform = ?')
+      .run(`email:${instanceId}`);
   }
 
   // ==================== Utility ====================

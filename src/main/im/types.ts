@@ -383,6 +383,79 @@ export interface WeixinGatewayStatus {
   lastOutboundAt: number | null;
 }
 
+// ==================== Email Channel Types ====================
+
+export interface EmailInstanceConfig {
+  instanceId: string; // "email-1", "email-2", etc.
+  instanceName: string; // Display name: "Work Email"
+  enabled: boolean; // Enable/disable this account
+
+  // Transport mode
+  transport: 'imap' | 'ws'; // IMAP/SMTP or WebSocket
+
+  // Account credentials
+  email: string; // user@example.com
+  password?: string; // Required if transport=imap
+  apiKey?: string; // Required if transport=ws (format: ck_*)
+
+  // Agent binding
+  agentId: string; // Agent ID (default: "main")
+
+  // IMAP/SMTP servers (optional, auto-detected if empty)
+  imapHost?: string;
+  imapPort?: number;
+  smtpHost?: string;
+  smtpPort?: number;
+
+  // Security & policy
+  allowFrom?: string[]; // Whitelist: ["user@example.com", "*.trusted.com"]
+
+  // Advanced options
+  replyMode?: 'immediate' | 'accumulated' | 'complete';
+  replyTo?: 'sender' | 'all';
+
+  // Agent-to-Agent collaboration
+  a2aEnabled?: boolean;
+  a2aAgentDomains?: string[];
+  a2aMaxPingPongTurns?: number;
+}
+
+export interface EmailMultiInstanceConfig {
+  instances: EmailInstanceConfig[];
+}
+
+export interface EmailInstanceStatus {
+  instanceId: string;
+  instanceName: string;
+  connected: boolean;
+  startedAt: number | null;
+  lastError: string | null;
+  email: string | null;
+  transport: 'imap' | 'ws' | null;
+  lastInboundAt: number | null;
+  lastOutboundAt: number | null;
+}
+
+export interface EmailMultiInstanceStatus {
+  instances: EmailInstanceStatus[];
+}
+
+export const DEFAULT_EMAIL_INSTANCE_CONFIG: Partial<EmailInstanceConfig> = {
+  enabled: true,
+  transport: 'imap',
+  agentId: 'main',
+  replyMode: 'complete',
+  replyTo: 'sender',
+  a2aEnabled: false,
+  a2aMaxPingPongTurns: 20,
+};
+
+export const DEFAULT_EMAIL_MULTI_INSTANCE_CONFIG: EmailMultiInstanceConfig = {
+  instances: [],
+};
+
+export const MAX_EMAIL_INSTANCES = 5;
+
 // ==================== Common IM Types ====================
 
 export interface IMGatewayConfig {
@@ -396,7 +469,7 @@ export interface IMGatewayConfig {
   wecom: WecomOpenClawConfig;
   popo: PopoOpenClawConfig;
   weixin: WeixinOpenClawConfig;
-  email?: EmailMultiInstanceConfig; // Optional: new in this version
+  email: EmailMultiInstanceConfig;
   settings: IMSettings;
 }
 
@@ -418,7 +491,7 @@ export interface IMGatewayStatus {
   wecom: WecomGatewayStatus;
   popo: PopoGatewayStatus;
   weixin: WeixinGatewayStatus;
-  email?: EmailMultiInstanceStatus; // Optional: new in this version
+  email: EmailMultiInstanceStatus;
 }
 
 // ==================== Media Attachment Types ====================
@@ -810,77 +883,3 @@ export interface MediaMarker {
   name?: string;
   originalMarker: string;
 }
-
-// ==================== Email Channel Types ====================
-
-export interface EmailInstanceConfig {
-  instanceId: string; // "email-1", "email-2", etc.
-  instanceName: string; // Display name: "Work Email"
-  enabled: boolean; // Enable/disable this account
-
-  // Transport mode
-  transport: 'imap' | 'ws'; // IMAP/SMTP or WebSocket
-
-  // Account credentials
-  email: string; // user@example.com
-  password?: string; // Required if transport=imap
-  apiKey?: string; // Required if transport=ws (format: ck_*)
-
-  // Agent binding
-  agentId: string; // Agent ID (default: "main")
-
-  // IMAP/SMTP servers (optional, auto-detected if empty)
-  imapHost?: string;
-  imapPort?: number;
-  smtpHost?: string;
-  smtpPort?: number;
-
-  // Security & policy
-  allowFrom?: string[]; // Whitelist: ["user@example.com", "*.trusted.com"]
-
-  // Advanced options
-  replyMode?: 'immediate' | 'accumulated' | 'complete';
-  replyTo?: 'sender' | 'all';
-
-  // Agent-to-Agent collaboration
-  a2aEnabled?: boolean;
-  a2aAgentDomains?: string[];
-  a2aMaxPingPongTurns?: number;
-}
-
-export interface EmailMultiInstanceConfig {
-  instances: EmailInstanceConfig[];
-}
-
-export interface EmailInstanceStatus {
-  instanceId: string;
-  instanceName: string;
-  connected: boolean;
-  startedAt: number | null;
-  lastError: string | null;
-  email: string | null;
-  transport: 'imap' | 'ws' | null;
-  lastInboundAt: number | null;
-  lastOutboundAt: number | null;
-}
-
-export interface EmailMultiInstanceStatus {
-  instances: EmailInstanceStatus[];
-}
-
-// Default configurations
-export const DEFAULT_EMAIL_INSTANCE_CONFIG: Partial<EmailInstanceConfig> = {
-  enabled: true,
-  transport: 'imap',
-  agentId: 'main',
-  replyMode: 'complete',
-  replyTo: 'sender',
-  a2aEnabled: false,
-  a2aMaxPingPongTurns: 20,
-};
-
-export const DEFAULT_EMAIL_MULTI_INSTANCE_CONFIG: EmailMultiInstanceConfig = {
-  instances: [],
-};
-
-export const MAX_EMAIL_INSTANCES = 5;

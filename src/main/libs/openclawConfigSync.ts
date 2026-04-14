@@ -711,6 +711,7 @@ type OpenClawConfigSyncDeps = {
   getQQInstances: () => QQInstanceConfig[];
   getWecomConfig: () => WecomOpenClawConfig | null;
   getPopoConfig: () => PopoOpenClawConfig | null;
+  getEmailOpenClawConfig?: () => EmailMultiInstanceConfig;
   getNimConfig: () => NimConfig | null;
   getNeteaseBeeChanConfig: () => NeteaseBeeChanConfig | null;
   getWeixinConfig: () => WeixinOpenClawConfig | null;
@@ -751,6 +752,7 @@ export class OpenClawConfigSync {
     this.getQQInstances = deps.getQQInstances;
     this.getWecomConfig = deps.getWecomConfig;
     this.getPopoConfig = deps.getPopoConfig;
+    this.getEmailOpenClawConfig = deps.getEmailOpenClawConfig;
     this.getNimConfig = deps.getNimConfig;
     this.getNeteaseBeeChanConfig = deps.getNeteaseBeeChanConfig;
     this.getWeixinConfig = deps.getWeixinConfig;

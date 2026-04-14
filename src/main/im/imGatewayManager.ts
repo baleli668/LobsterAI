@@ -501,6 +501,19 @@ export class IMGatewayManager extends EventEmitter {
         lastInboundAt: null as number | null,
         lastOutboundAt: null as number | null,
       },
+      email: {
+        instances: (config.email?.instances || []).map(inst => ({
+          instanceId: inst.instanceId,
+          instanceName: inst.instanceName,
+          connected: Boolean(inst.enabled && inst.email),
+          startedAt: null as number | null,
+          lastError: null as string | null,
+          email: inst.email || null,
+          transport: inst.transport || null,
+          lastInboundAt: null as number | null,
+          lastOutboundAt: null as number | null,
+        })),
+      },
     };
   }
 
@@ -562,6 +575,20 @@ export class IMGatewayManager extends EventEmitter {
           code: 'gateway_running',
           level: 'info',
           message: 'NetEase Bee channel does not support standalone connectivity testing.',
+        }],
+      };
+    }
+
+    // Email is managed via OpenClaw plugin, no standalone gateway to test here
+    if (platform === 'email') {
+      return {
+        platform,
+        testedAt: Date.now(),
+        verdict: 'warn',
+        checks: [{
+          code: 'gateway_running',
+          level: 'info',
+          message: 'Email channel does not support standalone connectivity testing.',
         }],
       };
     }

@@ -59,6 +59,7 @@ interface CoworkConfig {
   memoryLlmJudgeEnabled: boolean;
   memoryGuardLevel: 'strict' | 'standard' | 'relaxed';
   memoryUserMemoriesMaxItems: number;
+  skipMissedJobs: boolean;
 }
 
 type CoworkConfigUpdate = Partial<Pick<
@@ -71,6 +72,7 @@ type CoworkConfigUpdate = Partial<Pick<
   | 'memoryLlmJudgeEnabled'
   | 'memoryGuardLevel'
   | 'memoryUserMemoriesMaxItems'
+  | 'skipMissedJobs'
 >>;
 
 interface CoworkUserMemoryEntry {
@@ -460,6 +462,9 @@ interface IElectronAPI {
     addDingTalkInstance: (name: string) => Promise<{ success: boolean; instance?: DingTalkInstanceConfig; error?: string }>;
     deleteDingTalkInstance: (instanceId: string) => Promise<{ success: boolean; error?: string }>;
     setDingTalkInstanceConfig: (instanceId: string, config: any, options?: { syncGateway?: boolean }) => Promise<{ success: boolean; error?: string }>;
+    addEmailInstance: (name: string) => Promise<{ success: boolean; instance?: EmailInstanceConfig; error?: string }>;
+    deleteEmailInstance: (instanceId: string) => Promise<{ success: boolean; error?: string }>;
+    setEmailInstanceConfig: (instanceId: string, config: any, options?: { syncGateway?: boolean }) => Promise<{ success: boolean; error?: string }>;
     onStatusChange: (callback: (status: IMGatewayStatus) => void) => () => void;
     onMessageReceived: (callback: (message: IMMessage) => void) => () => void;
   };
@@ -581,6 +586,47 @@ interface IElectronAPI {
 }
 
 // IM Gateway types
+interface EmailInstanceConfig {
+  instanceId: string;
+  instanceName: string;
+  enabled: boolean;
+  transport: 'imap' | 'ws';
+  email: string;
+  password?: string;
+  apiKey?: string;
+  agentId: string;
+  imapHost?: string;
+  imapPort?: number;
+  smtpHost?: string;
+  smtpPort?: number;
+  allowFrom?: string[];
+  replyMode?: 'immediate' | 'accumulated' | 'complete';
+  replyTo?: 'sender' | 'all';
+  a2aEnabled?: boolean;
+  a2aAgentDomains?: string[];
+  a2aMaxPingPongTurns?: number;
+}
+
+interface EmailMultiInstanceConfig {
+  instances: EmailInstanceConfig[];
+}
+
+interface EmailInstanceStatus {
+  instanceId: string;
+  instanceName: string;
+  connected: boolean;
+  startedAt: number | null;
+  lastError: string | null;
+  email: string | null;
+  transport: 'imap' | 'ws' | null;
+  lastInboundAt: number | null;
+  lastOutboundAt: number | null;
+}
+
+interface EmailMultiInstanceStatus {
+  instances: EmailInstanceStatus[];
+}
+
 interface IMGatewayConfig {
   dingtalk: DingTalkMultiInstanceConfig;
   feishu: FeishuMultiInstanceConfig;
@@ -592,6 +638,7 @@ interface IMGatewayConfig {
   wecom: WecomConfig;
   popo: PopoOpenClawConfig;
   weixin: WeixinOpenClawConfig;
+  email: EmailMultiInstanceConfig;
   settings: IMSettings;
 }
 
@@ -634,6 +681,17 @@ interface FeishuOpenClawGroupConfig {
   systemPrompt?: string;
 }
 
+interface FeishuOpenClawFooterConfig {
+  status?: boolean;
+  elapsed?: boolean;
+}
+
+interface FeishuOpenClawBlockStreamingCoalesceConfig {
+  minChars?: number;
+  maxChars?: number;
+  idleMs?: number;
+}
+
 interface FeishuOpenClawConfig {
   enabled: boolean;
   appId: string;
@@ -645,7 +703,11 @@ interface FeishuOpenClawConfig {
   groupAllowFrom: string[];
   groups: Record<string, FeishuOpenClawGroupConfig>;
   historyLimit: number;
+  streaming: boolean;
   replyMode: 'auto' | 'static' | 'streaming';
+  blockStreaming: boolean;
+  footer: FeishuOpenClawFooterConfig;
+  blockStreamingCoalesce?: FeishuOpenClawBlockStreamingCoalesceConfig;
   mediaMaxMb: number;
   debug: boolean;
 }
@@ -842,6 +904,7 @@ interface IMGatewayStatus {
   wecom: WecomGatewayStatus;
   popo: PopoGatewayStatus;
   weixin: WeixinGatewayStatus;
+  email: EmailMultiInstanceStatus;
 }
 
 type IMConnectivityVerdict = 'pass' | 'warn' | 'fail';
