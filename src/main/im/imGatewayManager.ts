@@ -488,7 +488,7 @@ export class IMGatewayManager extends EventEmitter {
         lastOutboundAt: null as number | null,
       },
       weixin: {
-        connected: Boolean(config.weixin?.enabled && config.weixin?.accountId),
+        connected: Boolean(config.weixin?.enabled),
         startedAt: null as number | null,
         lastError: null as string | null,
         lastInboundAt: null as number | null,
@@ -972,7 +972,7 @@ export class IMGatewayManager extends EventEmitter {
     }
     if (platform === 'weixin') {
       const config = this.getConfig();
-      return Boolean(config.weixin?.enabled && config.weixin?.accountId);
+      return Boolean(config.weixin?.enabled);
     }
     if (platform === 'popo') {
       // POPO runs via OpenClaw; consider it connected when enabled and configured
@@ -1497,7 +1497,7 @@ export class IMGatewayManager extends EventEmitter {
         'web.login.wait',
         { timeoutMs: 480000, ...(accountId ? { accountId } : {}) },
       );
-      console.log('[IMGatewayManager] Weixin QR login wait result:', result.message, 'connected:', result.connected);
+      console.log('[IMGatewayManager] Weixin QR login wait result:', JSON.stringify({ connected: result.connected, message: result.message, accountId: result.accountId }));
       if (result.connected) {
         // Sync config and restart gateway so the weixin channel starts with
         // the newly saved account credentials. The gateway's web.login.wait
