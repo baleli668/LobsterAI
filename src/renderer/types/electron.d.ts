@@ -401,6 +401,7 @@ interface IElectronAPI {
     selectFiles: (options?: { title?: string; filters?: { name: string; extensions: string[] }[] }) => Promise<{ success: boolean; paths: string[] }>;
     saveInlineFile: (options: { dataBase64: string; fileName?: string; mimeType?: string; cwd?: string }) => Promise<{ success: boolean; path: string | null; error?: string }>;
     readFileAsDataUrl: (filePath: string) => Promise<{ success: boolean; dataUrl?: string; error?: string }>;
+    showMessageBox: (options: { message: string; type?: 'none' | 'info' | 'error' | 'question' | 'warning'; title?: string }) => Promise<{ response: number }>;
   };
   shell: {
     openPath: (filePath: string) => Promise<{ success: boolean; error?: string }>;
@@ -496,6 +497,9 @@ interface IElectronAPI {
     addDingTalkInstance: (name: string) => Promise<{ success: boolean; instance?: DingTalkInstanceConfig; error?: string }>;
     deleteDingTalkInstance: (instanceId: string) => Promise<{ success: boolean; error?: string }>;
     setDingTalkInstanceConfig: (instanceId: string, config: any, options?: { syncGateway?: boolean }) => Promise<{ success: boolean; error?: string }>;
+    addEmailInstance: (name: string) => Promise<{ success: boolean; instance?: EmailInstanceConfig; error?: string }>;
+    deleteEmailInstance: (instanceId: string) => Promise<{ success: boolean; error?: string }>;
+    setEmailInstanceConfig: (instanceId: string, config: any, options?: { syncGateway?: boolean }) => Promise<{ success: boolean; error?: string }>;
     addWecomInstance: (name: string) => Promise<{ success: boolean; instance?: WecomInstanceConfig; error?: string }>;
     deleteWecomInstance: (instanceId: string) => Promise<{ success: boolean; error?: string }>;
     setWecomInstanceConfig: (instanceId: string, config: any, options?: { syncGateway?: boolean }) => Promise<{ success: boolean; error?: string }>;
@@ -616,6 +620,47 @@ interface IElectronAPI {
 }
 
 // IM Gateway types
+interface EmailInstanceConfig {
+  instanceId: string;
+  instanceName: string;
+  enabled: boolean;
+  transport: 'imap' | 'ws';
+  email: string;
+  password?: string;
+  apiKey?: string;
+  agentId: string;
+  imapHost?: string;
+  imapPort?: number;
+  smtpHost?: string;
+  smtpPort?: number;
+  allowFrom?: string[];
+  replyMode?: 'immediate' | 'accumulated' | 'complete';
+  replyTo?: 'sender' | 'all';
+  a2aEnabled?: boolean;
+  a2aAgentDomains?: string[];
+  a2aMaxPingPongTurns?: number;
+}
+
+interface EmailMultiInstanceConfig {
+  instances: EmailInstanceConfig[];
+}
+
+interface EmailInstanceStatus {
+  instanceId: string;
+  instanceName: string;
+  connected: boolean;
+  startedAt: number | null;
+  lastError: string | null;
+  email: string | null;
+  transport: 'imap' | 'ws' | null;
+  lastInboundAt: number | null;
+  lastOutboundAt: number | null;
+}
+
+interface EmailMultiInstanceStatus {
+  instances: EmailInstanceStatus[];
+}
+
 interface IMGatewayConfig {
   dingtalk: DingTalkMultiInstanceConfig;
   feishu: FeishuMultiInstanceConfig;
@@ -627,6 +672,7 @@ interface IMGatewayConfig {
   wecom: WecomMultiInstanceConfig;
   popo: PopoOpenClawConfig;
   weixin: WeixinOpenClawConfig;
+  email: EmailMultiInstanceConfig;
   settings: IMSettings;
 }
 
@@ -929,6 +975,7 @@ interface IMGatewayStatus {
   wecom: WecomMultiInstanceStatus;
   popo: PopoGatewayStatus;
   weixin: WeixinGatewayStatus;
+  email: EmailMultiInstanceStatus;
 }
 
 interface NimInstanceStatus extends NimGatewayStatus {
