@@ -1546,22 +1546,20 @@ export class SkillManager {
       throw new Error('Built-in skills cannot be deleted');
     }
 
-    let targetDir = resolveWithin(root, id);
+    let targetDir: string | null = resolveWithin(root, id);
     if (!fs.existsSync(targetDir)) {
       const bundledRoot = this.getBundledSkillsRoot();
       if (bundledRoot && bundledRoot !== root) {
         const bundledTarget = resolveWithin(bundledRoot, id);
-        if (fs.existsSync(bundledTarget)) {
-          targetDir = bundledTarget;
-        } else {
-          throw new Error('Skill not found');
-        }
+        targetDir = fs.existsSync(bundledTarget) ? bundledTarget : null;
       } else {
-        throw new Error('Skill not found');
+        targetDir = null;
       }
     }
 
-    fs.rmSync(targetDir, { recursive: true, force: true });
+    if (targetDir !== null) {
+      fs.rmSync(targetDir, { recursive: true, force: true });
+    }
     const state = this.loadSkillStateMap();
     delete state[id];
     this.saveSkillStateMap(state);
