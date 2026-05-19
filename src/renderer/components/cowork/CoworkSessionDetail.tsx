@@ -2,6 +2,7 @@ import {
   CheckIcon,
   ChevronRightIcon,
   DocumentArrowDownIcon,
+  DocumentTextIcon,
   PhotoIcon,
 } from '@heroicons/react/24/outline';
 import React, { useCallback, useEffect, useLayoutEffect, useMemo,useRef, useState } from 'react';
@@ -739,6 +740,27 @@ const isSilentAssistantMessage = (message: CoworkMessage): boolean => (
 
 const isContextCompactionMessage = (message: CoworkMessage): boolean => (
   message.type === 'system' && message.metadata?.kind === 'context_compaction'
+);
+
+const ContextCompactionDivider: React.FC<{ label: string; active?: boolean }> = ({
+  label,
+  active = false,
+}) => (
+  <div
+    className="flex w-full items-center gap-3 py-3 text-secondary"
+    role={active ? 'status' : undefined}
+    aria-live={active ? 'polite' : undefined}
+  >
+    <div className="h-px min-w-0 flex-1 bg-border" />
+    <div className="inline-flex max-w-[min(100%,360px)] items-center gap-2 bg-background px-2 text-[15px] font-medium leading-6">
+      <DocumentTextIcon
+        className={`h-4 w-4 flex-shrink-0 stroke-[1.8] ${active ? 'animate-pulse' : ''}`}
+        aria-hidden="true"
+      />
+      <span className="truncate">{label}</span>
+    </div>
+    <div className="h-px min-w-0 flex-1 bg-border" />
+  </div>
 );
 
 export const buildDisplayItems = (messages: CoworkMessage[]): DisplayItem[] => {
@@ -1543,6 +1565,10 @@ export const AssistantTurnBlock: React.FC<{
     const normalizedContent = getScheduledReminderDisplayText(rawContent) ?? rawContent;
     const content = mapDisplayText ? mapDisplayText(normalizedContent) : normalizedContent;
     if (!content.trim()) return null;
+
+    if (isContextCompactionMessage(message)) {
+      return <ContextCompactionDivider label={content} />;
+    }
 
     return (
       <div className="rounded-lg border border-border bg-background px-3 py-2">
@@ -2693,7 +2719,7 @@ const CoworkSessionDetail: React.FC<CoworkSessionDetailProps> = ({
       currentRailIndexRef.current = lastRail;
       setCurrentRailIndex(lastRail);
     }
-  }, [messagesLength, lastMessageContent, isStreaming, shouldAutoScroll, turns.length]);
+  }, [messagesLength, lastMessageContent, isContextCompacting, isStreaming, shouldAutoScroll, turns.length]);
 
 
   if (!currentSession) {
@@ -2963,6 +2989,16 @@ const CoworkSessionDetail: React.FC<CoworkSessionDetailProps> = ({
             </div>
           )}
           {renderConversationTurns()}
+          {isContextCompacting && (
+            <div className={`${COWORK_DETAIL_GUTTER_CLASS} animate-message-in`}>
+              <div className={COWORK_DETAIL_CONTENT_CLASS}>
+                <ContextCompactionDivider
+                  label={i18nService.t('coworkContextCompacting')}
+                  active
+                />
+              </div>
+            </div>
+          )}
           <div className="h-20" />
         </div>
 

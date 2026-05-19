@@ -898,10 +898,10 @@ const translations: Record<LanguageType, Record<string, string>> = {
     coworkContextCompactConfirmAction: '开始压缩',
     coworkContextCompactConfirmActionShort: '压缩',
     coworkContextCompactBlockedRunning: '当前任务仍在运行，完成后再压缩上下文。',
-    coworkContextCompacting: '正在压缩上下文...',
+    coworkContextCompacting: '上下文自动压缩中',
     coworkContextCompactingSendBlocked: '正在压缩上下文，请稍后继续。',
-    coworkContextAutoCompacted: '上下文已自动压缩，并继续执行当前任务。',
-    coworkContextManualCompacted: '上下文已压缩',
+    coworkContextAutoCompacted: '上下文已自动压缩',
+    coworkContextManualCompacted: '上下文已自动压缩',
     coworkContextManualCompactNoop: '当前上下文无需压缩',
 
     // Cowork 错误消息
@@ -2849,10 +2849,10 @@ const translations: Record<LanguageType, Record<string, string>> = {
     coworkContextCompactConfirmAction: 'Start compaction',
     coworkContextCompactConfirmActionShort: 'Compact',
     coworkContextCompactBlockedRunning: 'The current task is still running. Compact context after it finishes.',
-    coworkContextCompacting: 'Compacting context...',
+    coworkContextCompacting: 'Auto-compacting context',
     coworkContextCompactingSendBlocked: 'Context compaction is running. Please try again shortly.',
-    coworkContextAutoCompacted: 'Context was automatically compacted, and the task is continuing.',
-    coworkContextManualCompacted: 'Context compacted',
+    coworkContextAutoCompacted: 'Context auto-compacted',
+    coworkContextManualCompacted: 'Context auto-compacted',
     coworkContextManualCompactNoop: 'No context compaction was needed',
 
     // Cowork error messages

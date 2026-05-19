@@ -308,6 +308,7 @@ class CoworkService {
             kind: 'context_compaction',
             mode: 'auto',
             compactionCount: nextCount,
+            compacted: true,
           },
         },
       }));
@@ -379,6 +380,7 @@ class CoworkService {
             metadata: {
               kind: 'context_compaction',
               mode: 'manual',
+              compacted: result.compacted === true,
             },
           },
         }));
