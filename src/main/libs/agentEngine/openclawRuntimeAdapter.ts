@@ -1044,6 +1044,8 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
   private readonly subagentSessionKeys = new Map<string, string>();
   /** Maps agentId → collected conversation messages */
   private readonly subagentMessages = new Map<string, Array<{ role: string; content: string }>>();
+  /** Maps toolCallId → agentId for correlating spawn start → result */
+  private readonly subagentToolCallIdToAgentId = new Map<string, string>();
   /** Maps agentId → lifecycle status */
   private readonly subagentStatus = new Map<string, 'running' | 'done'>();
 
@@ -2659,6 +2661,20 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
               '[OpenClawRuntime] incremental backfill from chat.history',
               `toolCallId=${msgToolCallId}`, `len=${text.length}`, `prevLen=${existingText.length}`,
             );
+
+            // Extract childSessionKey from backfilled sessions_spawn results
+            const backfillAgentId = this.subagentToolCallIdToAgentId.get(msgToolCallId);
+            if (backfillAgentId && !this.subagentSessionKeys.has(backfillAgentId)) {
+              try {
+                const parsed = JSON.parse(text);
+                const childSessionKey = typeof parsed?.childSessionKey === 'string' ? parsed.childSessionKey : '';
+                if (childSessionKey) {
+                  this.subagentSessionKeys.set(backfillAgentId, childSessionKey);
+                  this.store.updateSubagentRunSessionKey(backfillAgentId, childSessionKey);
+                  console.log('[OpenClawRuntime] subagent session key from backfill:', backfillAgentId, childSessionKey);
+                }
+              } catch { /* not JSON */ }
+            }
           }
         }
       }
@@ -3545,7 +3561,9 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
           ? args.agentId
           : typeof args?.taskName === 'string' && args.taskName
             ? args.taskName
-            : toolCallId; // fallback to toolCallId as unique identifier
+            : typeof args?.label === 'string' && args.label
+              ? args.label
+              : toolCallId; // fallback to toolCallId as unique identifier
         const task = typeof args?.task === 'string' ? args.task : '';
         const label = typeof args?.label === 'string' ? args.label : undefined;
         if (agentId) {
@@ -3553,6 +3571,8 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
           if (!this.subagentMessages.has(agentId)) {
             this.subagentMessages.set(agentId, []);
           }
+          // Store toolCallId → agentId mapping for result phase correlation
+          this.subagentToolCallIdToAgentId.set(toolCallId, agentId);
           // Persist subagent run to local store
           this.store.insertSubagentRun({
             id: agentId,
@@ -3655,8 +3675,10 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
         try {
           const parsed = JSON.parse(finalContent);
           const childSessionKey = typeof parsed?.childSessionKey === 'string' ? parsed.childSessionKey : '';
-          const agentId = typeof (toToolInputRecord(data.args) as Record<string, unknown>)?.agentId === 'string'
+          // Resolve agentId: prefer stored mapping from spawn phase, fallback to args
+          const argsAgentId = typeof (toToolInputRecord(data.args) as Record<string, unknown>)?.agentId === 'string'
             ? (toToolInputRecord(data.args) as Record<string, unknown>).agentId as string : '';
+          const agentId = this.subagentToolCallIdToAgentId.get(toolCallId) || argsAgentId;
           if (agentId && childSessionKey) {
             this.subagentSessionKeys.set(agentId, childSessionKey);
             // Persist session key to local store
@@ -5800,8 +5822,19 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
       return local;
     }
 
-    // 2. Resolve session key
-    const key = sessionKey || this.subagentSessionKeys.get(agentId);
+    // 2. Resolve session key from multiple sources
+    let key = sessionKey || this.subagentSessionKeys.get(agentId);
+
+    // 2b. Try reading from persistent store if not in memory
+    if (!key) {
+      const runs = this.store.listSubagentRuns(_parentSessionId);
+      const matchingRun = runs.find((r) => r.id === agentId || r.agentId === agentId);
+      if (matchingRun?.sessionKey) {
+        key = matchingRun.sessionKey;
+        this.subagentSessionKeys.set(agentId, key);
+      }
+    }
+
     if (!key) {
       // Try to discover via sessions.list
       const discovered = await this.discoverSubagentSessionKey(agentId);
@@ -5927,6 +5960,7 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
     this.subagentSessionKeys.clear();
     this.subagentMessages.clear();
     this.subagentStatus.clear();
+    this.subagentToolCallIdToAgentId.clear();
   }
 
   /**
