@@ -11,6 +11,15 @@ import { migrateScheduledTaskRunsToOpenclaw, migrateScheduledTasksToOpenclaw } f
 import { AgentId, AgentIpcChannel } from '../shared/agent/constants';
 import { AppUpdateIpc } from '../shared/appUpdate/constants';
 import { ArtifactBrowserPartition, ArtifactPreviewIpc } from '../shared/artifactPreview/constants';
+import {
+  type BrowserDiagnosticResultStep,
+  BrowserDiagnosticStatus,
+  BrowserDiagnosticStep,
+  BrowserIpc,
+  BrowserRuntimeProfile,
+  type BrowserWebAccessConfig,
+  normalizeBrowserWebAccessConfig,
+} from '../shared/browserWebAccess/constants';
 import { ClipboardIpc } from '../shared/clipboard/constants';
 import { COWORK_MESSAGE_PAGE_SIZE, COWORK_SESSION_PAGE_SIZE } from '../shared/cowork/constants';
 import { type ListLocalWebServicesOptions, type LocalWebService, LocalWebServicesIpc } from '../shared/localWebServices/constants';
@@ -1137,6 +1146,7 @@ const getOpenClawConfigSync = (): OpenClawConfigSync => {
     openClawConfigSync = new OpenClawConfigSync({
       engineManager: getOpenClawEngineManager(),
       getCoworkConfig: () => getCoworkStore().getConfig(),
+      getBrowserWebAccessConfig: () => getStore().get<AppConfigSettings>('app_config')?.browserWebAccess,
       isEnterprise: () => !!getStore().get('enterprise_config'),
       getOpenClawSessionPolicy: () => loadOpenClawSessionPolicyConfig(getStore()),
       getSkillsList: () => getSkillManager().listSkills().map(s => ({ id: s.id, enabled: s.enabled })),
@@ -1934,10 +1944,19 @@ type AppConfigSettings = {
   language?: string;
   useSystemProxy?: boolean;
   sqliteAutoBackupEnabled?: boolean;
+  browserWebAccess?: Partial<BrowserWebAccessConfig>;
 };
 
 const getUseSystemProxyFromConfig = (config?: { useSystemProxy?: boolean }): boolean => {
   return config?.useSystemProxy === true;
+};
+
+const hasBrowserWebAccessConfigChanged = (
+  previousConfig?: AppConfigSettings,
+  nextConfig?: AppConfigSettings,
+): boolean => {
+  return JSON.stringify(normalizeBrowserWebAccessConfig(previousConfig?.browserWebAccess)) !==
+    JSON.stringify(normalizeBrowserWebAccessConfig(nextConfig?.browserWebAccess));
 };
 
 const getSqliteAutoBackupEnabledFromConfig = (
@@ -2166,8 +2185,15 @@ if (!gotTheLock) {
   });
 
   ipcMain.handle('store:set', async (_event, key, value) => {
+    const previousAppConfig = key === 'app_config'
+      ? getStore().get<AppConfigSettings>('app_config')
+      : undefined;
     getStore().set(key, value);
     if (key === 'app_config') {
+      const nextAppConfig = value as AppConfigSettings | undefined;
+      const browserWebAccessChanged = hasBrowserWebAccessConfigChanged(previousAppConfig, nextAppConfig);
+      const systemProxyChanged = getUseSystemProxyFromConfig(previousAppConfig) !==
+        getUseSystemProxyFromConfig(nextAppConfig);
       refreshEndpointsTestMode(getStore());
       const syncResult = await syncOpenClawConfig({
         reason: 'app-config-change',
@@ -2175,6 +2201,13 @@ if (!gotTheLock) {
       });
       if (!syncResult.success) {
         console.error('[OpenClaw] Failed to sync config after app_config update:', syncResult.error);
+      }
+      if (syncResult.success && browserWebAccessChanged && !systemProxyChanged) {
+        const engineStatus = getOpenClawEngineManager().getStatus();
+        if (engineStatus.phase === 'running') {
+          console.log(`${gwDiagTs()} browser access settings changed, restarting gateway`);
+          void getOpenClawEngineManager().restartGateway('browser-access-settings-change');
+        }
       }
     }
   });
@@ -2897,6 +2930,195 @@ if (!gotTheLock) {
       };
     } finally {
       restartGatewayPromise = null;
+    }
+  });
+
+  const getBrowserControlBaseUrl = (): string => {
+    const info = getOpenClawEngineManager().getGatewayConnectionInfo();
+    if (!info.port) {
+      throw new Error('OpenClaw gateway port is unavailable.');
+    }
+    return `http://127.0.0.1:${info.port + 2}`;
+  };
+
+  const fetchBrowserControlJson = async <T,>(
+    path: string,
+    options: RequestInit & { timeoutMs?: number } = {},
+  ): Promise<T> => {
+    const { timeoutMs = 5000, ...requestOptions } = options;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const response = await fetch(`${getBrowserControlBaseUrl()}${path}`, {
+        ...requestOptions,
+        signal: controller.signal,
+      });
+      const text = await response.text();
+      let payload: unknown = null;
+      if (text) {
+        try {
+          payload = JSON.parse(text);
+        } catch {
+          payload = { error: text };
+        }
+      }
+      if (!response.ok) {
+        const errorMessage = payload && typeof payload === 'object' && 'error' in payload
+          ? String((payload as { error?: unknown }).error)
+          : `HTTP ${response.status}`;
+        throw new Error(errorMessage);
+      }
+      return payload as T;
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+
+  const buildBrowserProfileQuery = (profile?: string): string => (
+    profile ? `?profile=${encodeURIComponent(profile)}` : ''
+  );
+
+  ipcMain.handle(BrowserIpc.GetStatus, async (_event, options?: { profile?: BrowserRuntimeProfile }) => {
+    const requestedProfile = options?.profile ?? 'default';
+    console.log(`[BrowserDiagnostics] renderer requested browser status for profile "${requestedProfile}"`);
+    try {
+      const status = await fetchBrowserControlJson<Record<string, unknown>>(
+        `/${buildBrowserProfileQuery(options?.profile)}`,
+        { timeoutMs: 3000 },
+      );
+      console.log(
+        `[BrowserDiagnostics] renderer browser status resolved for profile "${requestedProfile}": profile=${String(status.profile ?? 'unknown')} driver=${String(status.driver ?? 'unknown')} transport=${String(status.transport ?? 'unknown')} running=${String(status.running ?? 'unknown')}`,
+      );
+      return { success: true, status };
+    } catch (error) {
+      console.warn(`[BrowserDiagnostics] renderer browser status failed for profile "${requestedProfile}":`, error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to get browser status',
+      };
+    }
+  });
+
+  ipcMain.handle(BrowserIpc.ListProfiles, async () => {
+    console.log('[BrowserDiagnostics] renderer requested browser profiles');
+    try {
+      const result = await fetchBrowserControlJson<{ profiles?: unknown[] }>(
+        '/profiles',
+        { timeoutMs: 5000 },
+      );
+      const profiles = Array.isArray(result.profiles)
+        ? result.profiles.map((profile) => {
+          if (!profile || typeof profile !== 'object') return 'unknown';
+          const item = profile as Record<string, unknown>;
+          return `${String(item.name ?? 'unknown')}:${String(item.driver ?? 'unknown')}:${String(item.transport ?? 'unknown')}`;
+        }).join(',')
+        : 'unknown';
+      console.log(`[BrowserDiagnostics] renderer browser profiles resolved: ${profiles}`);
+      return { success: true, profiles: result.profiles ?? [] };
+    } catch (error) {
+      console.warn('[BrowserDiagnostics] renderer browser profiles failed:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to list browser profiles',
+      };
+    }
+  });
+
+  ipcMain.handle(BrowserIpc.ResetProfile, async (_event, options?: { profile?: BrowserRuntimeProfile }) => {
+    try {
+      const profile = options?.profile || BrowserRuntimeProfile.Managed;
+      const result = await fetchBrowserControlJson<Record<string, unknown>>(
+        `/reset-profile${buildBrowserProfileQuery(profile)}`,
+        { method: 'POST', timeoutMs: 20000 },
+      );
+      return { success: true, result };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to reset browser profile',
+      };
+    }
+  });
+
+  ipcMain.handle(BrowserIpc.Test, async (_event, options?: { profile?: BrowserRuntimeProfile }) => {
+    const steps: BrowserDiagnosticResultStep[] = [];
+    const addStep = (step: BrowserDiagnosticStep, status: BrowserDiagnosticStatus, message: string, details?: string) => {
+      steps.push({
+        step,
+        status,
+        message,
+        ...(details ? { details } : {}),
+      });
+    };
+    const profile = options?.profile;
+
+    try {
+      const engineStatus = getOpenClawEngineManager().getStatus();
+      if (engineStatus.phase !== 'running') {
+        addStep(BrowserDiagnosticStep.GatewayStatus, BrowserDiagnosticStatus.Error, 'browserDiagnosticGatewayNotRunning', engineStatus.message);
+        return { success: false, steps, error: engineStatus.message || 'OpenClaw gateway is not running.' };
+      }
+      addStep(BrowserDiagnosticStep.GatewayStatus, BrowserDiagnosticStatus.Success, 'browserDiagnosticGatewayReady');
+
+      try {
+        const profiles = await fetchBrowserControlJson<{ profiles?: unknown[] }>(
+          '/profiles',
+          { timeoutMs: 5000 },
+        );
+        addStep(BrowserDiagnosticStep.Profiles, BrowserDiagnosticStatus.Success, 'browserDiagnosticProfilesReady', `${profiles.profiles?.length ?? 0}`);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        addStep(BrowserDiagnosticStep.Profiles, BrowserDiagnosticStatus.Error, 'browserDiagnosticProfilesFailed', message);
+        return { success: false, steps, error: message };
+      }
+
+      try {
+        await fetchBrowserControlJson<Record<string, unknown>>(
+          `/${buildBrowserProfileQuery(profile)}`,
+          { timeoutMs: 5000 },
+        );
+        addStep(BrowserDiagnosticStep.BrowserStatus, BrowserDiagnosticStatus.Success, 'browserDiagnosticStatusReady');
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        addStep(BrowserDiagnosticStep.BrowserStatus, BrowserDiagnosticStatus.Warning, 'browserDiagnosticStatusWarning', message);
+      }
+
+      try {
+        await fetchBrowserControlJson<Record<string, unknown>>(
+          `/start${buildBrowserProfileQuery(profile)}`,
+          { method: 'POST', timeoutMs: 20000 },
+        );
+        addStep(BrowserDiagnosticStep.BrowserStart, BrowserDiagnosticStatus.Success, 'browserDiagnosticStartReady');
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        addStep(BrowserDiagnosticStep.BrowserStart, BrowserDiagnosticStatus.Error, 'browserDiagnosticStartFailed', message);
+        return { success: false, steps, error: message };
+      }
+
+      try {
+        await fetchBrowserControlJson<Record<string, unknown>>(
+          `/tabs/open${buildBrowserProfileQuery(profile)}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url: 'https://example.com' }),
+            timeoutMs: 20000,
+          },
+        );
+        addStep(BrowserDiagnosticStep.OpenTestPage, BrowserDiagnosticStatus.Success, 'browserDiagnosticOpenPageReady');
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        addStep(BrowserDiagnosticStep.OpenTestPage, BrowserDiagnosticStatus.Error, 'browserDiagnosticOpenPageFailed', message);
+        return { success: false, steps, error: message };
+      }
+
+      return { success: true, steps };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Browser diagnostic failed';
+      if (steps.length === 0) {
+        addStep(BrowserDiagnosticStep.GatewayStatus, BrowserDiagnosticStatus.Error, 'browserDiagnosticGatewayFailed', message);
+      }
+      return { success: false, steps, error: message };
     }
   });
 
