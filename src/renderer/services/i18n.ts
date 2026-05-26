@@ -490,7 +490,10 @@ const translations: Record<LanguageType, Record<string, string>> = {
     coworkModelSettingsAction: '前往模型设置',
     modelGroupServer: '套餐模型',
     modelGroupUser: '自定义模型',
+    modelSelectorLockedOverlay: '订阅套餐/购买加油包解锁更多模型',
     modelSupportsImageInputBadge: '可读图',
+    modelSupportsThinkingBadge: '深度思考',
+    modelCostMultiplierLabel: '积分消耗倍率：',
     modelSelectorNoModels: '请先在设置中配置模型',
     coworkApiConfigTitle: 'API 配置',
     coworkApiConfigHint:
@@ -2639,7 +2642,10 @@ const translations: Record<LanguageType, Record<string, string>> = {
     coworkModelSettingsAction: 'Go to Model Settings',
     modelGroupServer: 'Plan Models',
     modelGroupUser: 'Custom Models',
+    modelSelectorLockedOverlay: 'Subscribe or purchase a booster pack to unlock more models',
     modelSupportsImageInputBadge: 'Reads images',
+    modelSupportsThinkingBadge: 'Deep thinking',
+    modelCostMultiplierLabel: 'Cost multiplier: ',
     modelSelectorNoModels: 'Please configure models in settings first',
     coworkApiConfigTitle: 'API Configuration',
     coworkApiConfigHint:

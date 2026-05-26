@@ -345,10 +345,15 @@ const MediaModelPicker: React.FC<MediaModelPickerProps> = ({ draftKey, disabled 
                   key={model.modelId}
                   type="button"
                   onClick={() => handleSelect(activeTab, model)}
-                  className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs transition-colors hover:bg-background/80 ${isSelected ? 'dark:bg-claude-darkSurfaceHover/50 bg-claude-surfaceHover/50' : ''}`}
+                  className={`flex w-full items-center gap-2 rounded px-2 py-2 text-left text-xs transition-colors hover:bg-background/80 ${isSelected ? 'dark:bg-claude-darkSurfaceHover/50 bg-claude-surfaceHover/50' : ''}`}
                 >
                   <span className="shrink-0 h-4 w-4 [&_svg]:h-4 [&_svg]:w-4">{resolveMediaModelIcon(model)}</span>
-                  <span className="min-w-0 truncate font-medium">{model.displayName}</span>
+                  <div className="min-w-0 flex-1">
+                    <span className="block truncate font-medium">{model.displayName}</span>
+                    {model.pricingDescription && (
+                      <span className="block truncate text-[10px] text-secondary leading-tight mt-0.5">{model.pricingDescription}</span>
+                    )}
+                  </div>
                   {isSelected && (
                     <CheckIcon className="h-4 w-4 shrink-0 text-emerald-500 ml-auto" />
                   )}

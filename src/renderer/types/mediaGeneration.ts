@@ -7,6 +7,8 @@ export interface MediaModel {
   mediaType: 'image' | 'video';
   generationTimeout: number;
   pricing: Record<string, unknown>;
+  pricingDescription?: string;
+  capabilities?: string;
 }
 
 export interface MediaQuotaStatus {
