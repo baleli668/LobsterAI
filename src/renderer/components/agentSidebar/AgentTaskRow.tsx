@@ -1,5 +1,5 @@
 import { ShareIcon } from '@heroicons/react/20/solid';
-import { ExclamationTriangleIcon } from '@heroicons/react/24/outline';
+import { ArrowsRightLeftIcon, ExclamationTriangleIcon } from '@heroicons/react/24/outline';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 
 import { i18nService } from '../../services/i18n';
@@ -23,6 +23,7 @@ interface AgentTaskRowProps {
   hasActiveSubagent?: boolean;
   onSelect: () => void;
   onDelete: () => Promise<void>;
+  onFork: () => Promise<void>;
   onShare: () => Promise<void>;
   onTogglePin: (pinned: boolean) => Promise<void>;
   onRename: (title: string) => Promise<void>;
@@ -32,8 +33,8 @@ interface AgentTaskRowProps {
 
 const ACTION_MENU_VIEWPORT_PADDING = 8;
 const ACTION_MENU_VERTICAL_GAP = 4;
-const ACTION_MENU_HEIGHT = 164;
-const ACTION_MENU_WITH_BATCH_HEIGHT = 196;
+const ACTION_MENU_HEIGHT = 196;
+const ACTION_MENU_WITH_BATCH_HEIGHT = 228;
 
 const AgentTaskRow: React.FC<AgentTaskRowProps> = ({
   task,
@@ -44,6 +45,7 @@ const AgentTaskRow: React.FC<AgentTaskRowProps> = ({
   hasActiveSubagent = false,
   onSelect,
   onDelete,
+  onFork,
   onShare,
   onTogglePin,
   onRename,
@@ -52,6 +54,7 @@ const AgentTaskRow: React.FC<AgentTaskRowProps> = ({
 }) => {
   const [menuPosition, setMenuPosition] = useState<{ right: number; top: number } | null>(null);
   const [showConfirmDelete, setShowConfirmDelete] = useState(false);
+  const [showConfirmFork, setShowConfirmFork] = useState(false);
   const [isRenaming, setIsRenaming] = useState(false);
   const [suppressPinHover, setSuppressPinHover] = useState(false);
   const [renameValue, setRenameValue] = useState(task.title);
@@ -351,6 +354,19 @@ const AgentTaskRow: React.FC<AgentTaskRowProps> = ({
             onClick={(event) => {
               event.stopPropagation();
               closeMenu();
+              setShowConfirmFork(true);
+            }}
+            className={menuItemClassName}
+            role="menuitem"
+          >
+            <ArrowsRightLeftIcon className={menuIconClassName} />
+            {i18nService.t('coworkForkSession')}
+          </button>
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              closeMenu();
               void onShare();
             }}
             className={menuItemClassName}
@@ -373,6 +389,49 @@ const AgentTaskRow: React.FC<AgentTaskRowProps> = ({
             {i18nService.t('deleteSession')}
           </button>
         </div>
+      )}
+
+      {showConfirmFork && (
+        <Modal
+          onClose={() => setShowConfirmFork(false)}
+          className="w-full max-w-md max-h-[calc(100vh-2rem)] mx-4 bg-surface rounded-2xl shadow-xl overflow-y-auto"
+        >
+          <div className="flex items-center gap-3 px-5 py-4">
+            <div className="p-2 rounded-full bg-surface-raised">
+              <ArrowsRightLeftIcon className="h-5 w-5 text-foreground" />
+            </div>
+            <h2 className="text-base font-semibold text-foreground">
+              {i18nService.t('coworkForkConfirmTitle')}
+            </h2>
+          </div>
+          <div className="space-y-3 px-5 pb-4">
+            <p className="text-sm text-secondary">
+              {i18nService.t('coworkForkConfirmMessage')}
+            </p>
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-500/30 dark:bg-amber-950/30 dark:text-amber-200">
+              {i18nService.t('coworkForkFileStateWarning')}
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center justify-end gap-3 px-5 py-4 border-t border-border">
+            <button
+              type="button"
+              onClick={() => setShowConfirmFork(false)}
+              className="px-4 py-2 text-sm font-medium rounded-lg text-secondary hover:bg-surface-raised transition-colors"
+            >
+              {i18nService.t('cancel')}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setShowConfirmFork(false);
+                void onFork();
+              }}
+              className="px-4 py-2 text-sm font-medium rounded-lg bg-primary text-primary-foreground hover:opacity-90 transition-opacity"
+            >
+              {i18nService.t('coworkForkToLocal')}
+            </button>
+          </div>
+        </Modal>
       )}
 
       {showConfirmDelete && (

@@ -1003,6 +1003,15 @@ const translations: Record<LanguageType, Record<string, string>> = {
     batchSelectionScope: '{agent} · 已选 {count} 个',
     batchDeleteConfirmTitle: '确认批量删除',
     batchDeleteConfirmMessage: '确定要删除选中的 {count} 个任务吗？此操作不可撤销。',
+    coworkForkSession: '分叉会话',
+    coworkForkConfirmTitle: '从当前会话创建分支？',
+    coworkForkConfirmMessage: '这会复制当前会话历史，并创建一个新的任务继续探索。',
+    coworkForkFileStateWarning:
+      '当前文件和工作树状态会保持不变，不会回滚到早期消息当时。如果后续轮次改过文件，新分支上下文可能与当前磁盘内容不一致。',
+    coworkForkToLocal: '派生到本地',
+    coworkForkCreated: '已创建分叉会话',
+    coworkForkFailed: '分叉会话失败',
+    coworkForkRunningBlocked: '请先停止当前任务，再创建分叉。',
     back: '返回',
     browse: '浏览',
     addFolder: '添加文件夹',
@@ -3283,6 +3292,16 @@ const translations: Record<LanguageType, Record<string, string>> = {
     batchDeleteConfirmTitle: 'Confirm Batch Deletion',
     batchDeleteConfirmMessage:
       'Are you sure you want to delete {count} selected tasks? This action cannot be undone.',
+    coworkForkSession: 'Fork session',
+    coworkForkConfirmTitle: 'Create a branch from this session?',
+    coworkForkConfirmMessage:
+      'This copies the current session history and creates a new task to continue exploring.',
+    coworkForkFileStateWarning:
+      'Your current files and worktree stay unchanged. They will not roll back to an earlier message. If later turns changed files, the new branch context may not match what is currently on disk.',
+    coworkForkToLocal: 'Fork locally',
+    coworkForkCreated: 'Forked session created',
+    coworkForkFailed: 'Failed to fork session',
+    coworkForkRunningBlocked: 'Stop the current task before creating a fork.',
     back: 'Back',
     browse: 'Browse',
     addFolder: 'Add Folder',

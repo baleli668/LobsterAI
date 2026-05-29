@@ -48,6 +48,7 @@ import {
   COWORK_SESSION_PAGE_SIZE,
   CoworkContextUsageFailureReason,
   CoworkContextUsageSource,
+  CoworkForkMode,
   CoworkIpcChannel,
 } from '../shared/cowork/constants';
 import { DialogIpc } from '../shared/dialog/constants';
@@ -5159,6 +5160,53 @@ if (!gotTheLock) {
         return {
           success: false,
           error: error instanceof Error ? error.message : 'Failed to rename session',
+        };
+      }
+    },
+  );
+
+  ipcMain.handle(
+    CoworkIpcChannel.ForkSession,
+    async (
+      _event,
+      options?: {
+        sessionId: string;
+        forkedFromMessageId?: string | null;
+        title?: string;
+      },
+    ) => {
+      try {
+        const sessionId = options?.sessionId?.trim();
+        if (!sessionId) {
+          return { success: false, error: 'Session id is required' };
+        }
+
+        const runtime = getCoworkEngineRouter();
+        const coworkStoreInstance = getCoworkStore();
+        const sourceSession = coworkStoreInstance.getSession(sessionId);
+        if (!sourceSession) {
+          console.warn('[CoworkFork] fork request referenced a missing session');
+          return { success: false, error: 'Session not found' };
+        }
+        if (sourceSession.status === 'running' || runtime.isSessionActive(sessionId)) {
+          console.warn('[CoworkFork] fork request was rejected because the session is still running');
+          return { success: false, error: 'Please stop the current task before forking it.' };
+        }
+
+        console.log('[CoworkFork] creating a local conversation fork');
+        const session = coworkStoreInstance.forkSession({
+          sourceSessionId: sessionId,
+          forkMode: CoworkForkMode.Conversation,
+          forkedFromMessageId: options?.forkedFromMessageId ?? null,
+          title: options?.title,
+        });
+        console.log('[CoworkFork] created a local conversation fork successfully');
+        return { success: true, session };
+      } catch (error) {
+        console.error('[CoworkFork] failed to fork session:', error);
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'Failed to fork session',
         };
       }
     },

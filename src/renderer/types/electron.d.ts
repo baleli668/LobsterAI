@@ -53,6 +53,13 @@ interface CoworkSession {
   messages: CoworkMessage[];
   messagesOffset: number;
   totalMessages: number;
+  parentSessionId?: string | null;
+  forkedFromMessageId?: string | null;
+  forkedAt?: number | null;
+  forkMode?: 'none' | 'conversation' | 'worktree';
+  forkWorkspacePath?: string | null;
+  forkGitBranch?: string | null;
+  forkGitBaseRef?: string | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -72,6 +79,9 @@ interface CoworkSessionSummary {
   pinned: boolean;
   pinOrder?: number | null;
   agentId?: string;
+  parentSessionId?: string | null;
+  forkedAt?: number | null;
+  forkMode?: 'none' | 'conversation' | 'worktree';
   createdAt: number;
   updatedAt: number;
 }
@@ -564,6 +574,11 @@ interface IElectronAPI {
       sessionId: string;
       title: string;
     }) => Promise<{ success: boolean; error?: string }>;
+    forkSession: (options: {
+      sessionId: string;
+      forkedFromMessageId?: string | null;
+      title?: string;
+    }) => Promise<{ success: boolean; session?: CoworkSession; error?: string }>;
     getSession: (
       sessionId: string,
     ) => Promise<{ success: boolean; session?: CoworkSession; error?: string }>;
