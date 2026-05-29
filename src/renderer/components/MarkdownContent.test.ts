@@ -6,8 +6,8 @@ import {
 } from './MarkdownContent';
 
 test('large markdown preview threshold only applies to oversized content', () => {
-  expect(shouldUseLargeMarkdownPreview('x'.repeat(30 * 1024))).toBe(false);
-  expect(shouldUseLargeMarkdownPreview('x'.repeat(30 * 1024 + 1))).toBe(true);
+  expect(shouldUseLargeMarkdownPreview('x'.repeat(8 * 1024))).toBe(false);
+  expect(shouldUseLargeMarkdownPreview('x'.repeat(8 * 1024 + 1))).toBe(true);
 });
 
 test('large markdown preview keeps the head and latest tail', () => {
