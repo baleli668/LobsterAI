@@ -57,6 +57,17 @@ export type CoworkContextUsage = {
   updatedAt: number;
 };
 
+export type CoworkForkCompactionSummary = {
+  summary: string;
+  sessionKey: string;
+  checkpointId?: string;
+  reason?: string;
+  createdAt?: number;
+  tokensBefore?: number;
+  tokensAfter?: number;
+  truncated?: boolean;
+};
+
 export type CoworkImageAttachment = {
   name: string;
   mimeType: string;
@@ -127,6 +138,7 @@ export interface CoworkRuntime {
   patchSession?(sessionId: string, patch: OpenClawSessionPatch): Promise<void>;
   getContextUsage?(sessionId: string): Promise<CoworkContextUsage | null>;
   compactContext?(sessionId: string): Promise<{ compacted: boolean; reason?: string; usage?: CoworkContextUsage | null }>;
+  getForkCompactionSummary?(sessionId: string, beforeCreatedAt?: number): Promise<CoworkForkCompactionSummary | null>;
   stopSession(sessionId: string): void;
   stopAllSessions(): void;
   respondToPermission(requestId: string, result: PermissionResult): void;

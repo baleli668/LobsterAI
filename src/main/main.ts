@@ -23,6 +23,7 @@ import path from 'path';
 import { Readable } from 'stream';
 import { fileURLToPath, pathToFileURL } from 'url';
 
+import { CoworkSystemMessageKind } from '../common/coworkSystemMessages';
 import type { OpenClawSessionPatch } from '../common/openclawSession';
 import { buildSessionTitleFromInput } from '../common/sessionTitle';
 import { buildScheduledTaskEnginePrompt } from '../scheduledTask/enginePrompt';
@@ -48,6 +49,7 @@ import {
   COWORK_SESSION_PAGE_SIZE,
   CoworkContextUsageFailureReason,
   CoworkContextUsageSource,
+  CoworkForkMode,
   CoworkIpcChannel,
 } from '../shared/cowork/constants';
 import { DialogIpc } from '../shared/dialog/constants';
@@ -75,7 +77,7 @@ import { AgentManager } from './agentManager';
 import { APP_NAME } from './appConstants';
 import { authQuotaGateStateFromQuota, AuthSubscriptionStatus, createDefaultAuthQuotaGateState, normalizeAuthQuota } from './authQuota';
 import { getAutoLaunchEnabled, isAutoLaunched, setAutoLaunchEnabled } from './autoLaunchManager';
-import { type CoworkMessage, CoworkStore } from './coworkStore';
+import { type CoworkForkContextMessage, type CoworkMessage, CoworkStore } from './coworkStore';
 import { setLanguage, t } from './i18n';
 import { IMGatewayConfig, IMGatewayManager } from './im';
 import {
@@ -5217,6 +5219,81 @@ if (!gotTheLock) {
         return {
           success: false,
           error: error instanceof Error ? error.message : 'Failed to rename session',
+        };
+      }
+    },
+  );
+
+  ipcMain.handle(
+    CoworkIpcChannel.ForkSession,
+    async (
+      _event,
+      options?: {
+        sessionId: string;
+        forkedFromMessageId?: string | null;
+        title?: string;
+      },
+    ) => {
+      try {
+        const sessionId = options?.sessionId?.trim();
+        if (!sessionId) {
+          return { success: false, error: 'Session id is required' };
+        }
+
+        const runtime = getCoworkEngineRouter();
+        const coworkStoreInstance = getCoworkStore();
+        const sourceSession = coworkStoreInstance.getSession(sessionId);
+        if (!sourceSession) {
+          console.warn('[CoworkFork] fork request referenced a missing session');
+          return { success: false, error: 'Session not found' };
+        }
+        if (sourceSession.status === 'running' || runtime.isSessionActive(sessionId)) {
+          console.warn('[CoworkFork] fork request was rejected because the session is still running');
+          return { success: false, error: 'Please stop the current task before forking it.' };
+        }
+
+        const forkedFromMessageId = options?.forkedFromMessageId?.trim() || null;
+        const forkedFromTimestamp = forkedFromMessageId
+          ? coworkStoreInstance.getMessageTimestamp(sessionId, forkedFromMessageId)
+          : null;
+        const forkContextMessages: CoworkForkContextMessage[] = [];
+        const compactionSummary = await runtime.getForkCompactionSummary(
+          sessionId,
+          forkedFromTimestamp ?? undefined,
+        );
+        if (compactionSummary) {
+          forkContextMessages.push({
+            content: compactionSummary.summary,
+            metadata: {
+              kind: CoworkSystemMessageKind.ForkCompactionSummary,
+              sourceSessionId: sessionId,
+              sourceSessionKey: compactionSummary.sessionKey,
+              checkpointId: compactionSummary.checkpointId ?? null,
+              checkpointReason: compactionSummary.reason ?? null,
+              checkpointCreatedAt: compactionSummary.createdAt ?? null,
+              tokensBefore: compactionSummary.tokensBefore ?? null,
+              tokensAfter: compactionSummary.tokensAfter ?? null,
+              truncated: compactionSummary.truncated === true,
+            },
+          });
+          console.log(`[CoworkFork] attached a compaction summary bridge from source session ${sessionId}`);
+        }
+
+        console.log(`[CoworkFork] creating a local conversation fork from session ${sessionId}`);
+        const session = coworkStoreInstance.forkSession({
+          sourceSessionId: sessionId,
+          forkMode: CoworkForkMode.Conversation,
+          forkedFromMessageId,
+          title: options?.title,
+          contextMessages: forkContextMessages,
+        });
+        console.log(`[CoworkFork] created local conversation fork ${session.id} successfully`);
+        return { success: true, session };
+      } catch (error) {
+        console.error('[CoworkFork] failed to fork session:', error);
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'Failed to fork session',
         };
       }
     },

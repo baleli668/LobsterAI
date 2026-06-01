@@ -45,6 +45,7 @@ import type {
   CoworkConfigUpdate,
   CoworkContextUsage,
   CoworkContinueOptions,
+  CoworkForkSessionOptions,
   CoworkMemoryStats,
   CoworkPermissionResult,
   CoworkSession,
@@ -806,6 +807,38 @@ class CoworkService {
 
     console.error('Failed to rename session:', result.error);
     return false;
+  }
+
+  async forkSession(options: CoworkForkSessionOptions): Promise<{ session: CoworkSession | null; error?: string }> {
+    const cowork = window.electron?.cowork;
+    if (!cowork?.forkSession) {
+      console.warn('[CoworkFork] fork API is unavailable in the renderer bridge');
+      return { session: null, error: 'Cowork fork API is unavailable' };
+    }
+
+    console.log(`[CoworkFork] requesting a local conversation fork for session ${options.sessionId}`);
+    try {
+      const result = await cowork.forkSession(options);
+      if (result.success && result.session) {
+        store.dispatch(addSession(result.session));
+        store.dispatch(setStreaming(false));
+        console.log(`[CoworkFork] renderer received forked session ${result.session.id} successfully`);
+        window.dispatchEvent(new CustomEvent('app:showToast', {
+          detail: i18nService.t('coworkForkCreated'),
+        }));
+        return { session: result.session };
+      }
+
+      const error = result.error || i18nService.t('coworkForkFailed');
+      window.dispatchEvent(new CustomEvent('app:showToast', { detail: error }));
+      console.warn(`[CoworkFork] renderer fork request for session ${options.sessionId} was rejected`);
+      return { session: null, error };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : i18nService.t('coworkForkFailed');
+      window.dispatchEvent(new CustomEvent('app:showToast', { detail: message }));
+      console.error('[CoworkFork] renderer fork request failed:', error);
+      return { session: null, error: message };
+    }
   }
 
   async exportSessionResultImage(options: {

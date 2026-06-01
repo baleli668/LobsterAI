@@ -1,6 +1,7 @@
 import type {
   CoworkContextUsageFailureReason,
   CoworkContextUsageSource,
+  CoworkForkMode,
 } from '../../shared/cowork/constants';
 import type {
   KitReference,
@@ -129,6 +130,13 @@ export interface CoworkSession {
   messagesOffset: number;
   /** Total number of messages stored for this session. */
   totalMessages: number;
+  parentSessionId?: string | null;
+  forkedFromMessageId?: string | null;
+  forkedAt?: number | null;
+  forkMode?: CoworkForkMode;
+  forkWorkspacePath?: string | null;
+  forkGitBranch?: string | null;
+  forkGitBaseRef?: string | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -257,8 +265,17 @@ export interface CoworkSessionSummary {
   pinned: boolean;
   pinOrder?: number | null;
   agentId?: string;
+  parentSessionId?: string | null;
+  forkedAt?: number | null;
+  forkMode?: CoworkForkMode;
   createdAt: number;
   updatedAt: number;
+}
+
+export interface CoworkForkSessionOptions {
+  sessionId: string;
+  forkedFromMessageId?: string | null;
+  title?: string;
 }
 
 // Subagent session summary for sidebar display

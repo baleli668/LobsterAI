@@ -52,6 +52,7 @@ import { SubagentTracker } from './subagentTracker';
 import type {
   CoworkContextUsage,
   CoworkContinueOptions,
+  CoworkForkCompactionSummary,
   CoworkMediaAttachmentRef,
   CoworkMediaSelection,
   CoworkRuntime,
@@ -64,6 +65,7 @@ import type {
 const OPENCLAW_GATEWAY_TOOL_EVENTS_CAP = 'tool-events';
 const BRIDGE_MAX_MESSAGES = 20;
 const BRIDGE_MAX_MESSAGE_CHARS = 1200;
+const FORK_COMPACTION_SUMMARY_MAX_CHARS = 40_000;
 // v2026.4.5 introduced a connect.challenge pre-auth step that can delay the
 // initial handshake when the gateway is busy loading plugins at startup.
 // The GatewayClient auto-reconnects and typically succeeds on the second
@@ -156,6 +158,17 @@ type GatewayRpcHealth = {
   consecutiveTimeouts: number;
   lastTimeoutMethod?: string;
   lastTimeoutAt?: number;
+};
+
+type OpenClawCompactionCheckpoint = {
+  checkpointId?: string;
+  sessionKey?: string;
+  sessionId?: string;
+  createdAt?: number;
+  reason?: string;
+  tokensBefore?: number;
+  tokensAfter?: number;
+  summary?: string;
 };
 
 type ChatEventState = 'delta' | 'final' | 'aborted' | 'error';
@@ -1978,6 +1991,77 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
     return { compacted, ...(reason ? { reason } : {}), usage };
   }
 
+  async getForkCompactionSummary(sessionId: string, beforeCreatedAt?: number): Promise<CoworkForkCompactionSummary | null> {
+    const client = this.gatewayClient;
+    if (!client) {
+      console.debug(`[OpenClawRuntime] skipped fork compaction lookup for session ${sessionId} because the gateway client is unavailable.`);
+      return null;
+    }
+
+    for (const sessionKey of this.getSessionKeysForSession(sessionId)) {
+      try {
+        const listResult = await client.request<{ checkpoints?: OpenClawCompactionCheckpoint[] } | OpenClawCompactionCheckpoint[]>(
+          'sessions.compaction.list',
+          { key: sessionKey },
+          { timeoutMs: 3_000 },
+        );
+        const checkpoints = Array.isArray(listResult)
+          ? listResult
+          : Array.isArray(listResult?.checkpoints)
+            ? listResult.checkpoints
+            : [];
+        const eligibleCheckpoints = typeof beforeCreatedAt === 'number'
+          ? checkpoints.filter((checkpoint) => (
+            typeof checkpoint.createdAt === 'number' && checkpoint.createdAt <= beforeCreatedAt
+          ))
+          : checkpoints;
+        const latest = eligibleCheckpoints
+          .filter((checkpoint) => typeof checkpoint?.summary === 'string' && checkpoint.summary.trim())
+          .sort((left, right) => (right.createdAt ?? 0) - (left.createdAt ?? 0))[0]
+          ?? eligibleCheckpoints
+            .filter((checkpoint) => typeof checkpoint?.checkpointId === 'string' && checkpoint.checkpointId.trim())
+            .sort((left, right) => (right.createdAt ?? 0) - (left.createdAt ?? 0))[0];
+
+        if (!latest) {
+          continue;
+        }
+
+        let checkpoint = latest;
+        if (!checkpoint.summary?.trim() && checkpoint.checkpointId) {
+          checkpoint = await client.request<OpenClawCompactionCheckpoint>(
+            'sessions.compaction.get',
+            { key: sessionKey, checkpointId: checkpoint.checkpointId },
+            { timeoutMs: 3_000 },
+          );
+        }
+
+        const summary = checkpoint.summary?.trim();
+        if (!summary) {
+          continue;
+        }
+
+        const truncated = summary.length > FORK_COMPACTION_SUMMARY_MAX_CHARS;
+        console.log(`[OpenClawRuntime] found a compaction checkpoint for forked session ${sessionId}.`);
+        return {
+          summary: truncated ? summary.slice(0, FORK_COMPACTION_SUMMARY_MAX_CHARS) : summary,
+          sessionKey,
+          ...(checkpoint.checkpointId ? { checkpointId: checkpoint.checkpointId } : {}),
+          ...(checkpoint.reason ? { reason: checkpoint.reason } : {}),
+          ...(typeof checkpoint.createdAt === 'number' ? { createdAt: checkpoint.createdAt } : {}),
+          ...(typeof checkpoint.tokensBefore === 'number' ? { tokensBefore: checkpoint.tokensBefore } : {}),
+          ...(typeof checkpoint.tokensAfter === 'number' ? { tokensAfter: checkpoint.tokensAfter } : {}),
+          ...(truncated ? { truncated } : {}),
+        };
+      } catch (error) {
+        console.warn(`[OpenClawRuntime] fork compaction lookup failed for session ${sessionId}; continuing without a summary.`, error);
+        return null;
+      }
+    }
+
+    console.debug(`[OpenClawRuntime] no compaction checkpoint was available for forked session ${sessionId}.`);
+    return null;
+  }
+
   private getContextWindowForModel(modelId: string): number | undefined {
     if (!this.contextWindowCacheLoaded) {
       this.contextWindowCacheLoaded = true;
@@ -3061,6 +3145,13 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
   private buildBridgePrefix(messages: CoworkMessage[], currentPrompt: string): string {
     const normalizedCurrentPrompt = currentPrompt.trim();
     if (!normalizedCurrentPrompt) return '';
+    const compactionSummaries = messages
+      .filter((message) => (
+        message.type === 'system'
+        && message.metadata?.kind === CoworkSystemMessageKind.ForkCompactionSummary
+        && message.content.trim()
+      ))
+      .map((message) => message.content.trim());
 
     const source = messages
       .filter((message) => {
@@ -3080,30 +3171,40 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
         content: message.content.trim(),
       }));
 
-    if (source.length === 0) {
-      return '';
-    }
-
     if (source[source.length - 1]?.type === 'user'
       && source[source.length - 1]?.content === normalizedCurrentPrompt) {
       source.pop();
     }
 
     const recent = source.slice(-BRIDGE_MAX_MESSAGES);
-    if (recent.length === 0) {
+    if (recent.length === 0 && compactionSummaries.length === 0) {
       return '';
+    }
+
+    const sections = [
+      '[Context bridge from previous LobsterAI conversation]',
+      'Use this prior context for continuity. Focus your final answer on the current request.',
+    ];
+
+    for (const summary of compactionSummaries) {
+      sections.push(
+        '[OpenClaw compaction summary from the fork source]',
+        truncate(summary, FORK_COMPACTION_SUMMARY_MAX_CHARS),
+      );
+    }
+    if (compactionSummaries.length > 0) {
+      console.debug(`[OpenClawRuntime] injected ${compactionSummaries.length} fork compaction summary bridge message(s).`);
     }
 
     const lines = recent.map((entry) => {
       const role = entry.type === 'user' ? 'User' : 'Assistant';
       return `${role}: ${truncate(entry.content, BRIDGE_MAX_MESSAGE_CHARS)}`;
     });
+    if (lines.length > 0) {
+      sections.push('[Recent visible conversation before the fork]', ...lines);
+    }
 
-    return [
-      '[Context bridge from previous LobsterAI conversation]',
-      'Use this prior context for continuity. Focus your final answer on the current request.',
-      ...lines,
-    ].join('\n');
+    return sections.join('\n');
   }
 
   private async ensureGatewayClientReady(): Promise<void> {

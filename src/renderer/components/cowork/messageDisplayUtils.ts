@@ -433,6 +433,10 @@ export const isContextCompactionMessage = (message: CoworkMessage): boolean => (
   message.type === 'system' && message.metadata?.kind === CoworkSystemMessageKind.ContextCompaction
 );
 
+export const isForkCompactionSummaryMessage = (message: CoworkMessage): boolean => (
+  message.type === 'system' && message.metadata?.kind === CoworkSystemMessageKind.ForkCompactionSummary
+);
+
 export const isLegacyInternalCompactionSystemMessage = (message: CoworkMessage): boolean => (
   message.type === 'system'
   && !message.metadata?.kind
@@ -444,6 +448,9 @@ const isRenderableAssistantOrSystemMessage = (message: CoworkMessage): boolean =
     return false;
   }
   if (isLegacyInternalCompactionSystemMessage(message)) {
+    return false;
+  }
+  if (isForkCompactionSummaryMessage(message)) {
     return false;
   }
   if (hasText(message.content) || hasText(message.metadata?.error)) {
@@ -1041,4 +1048,3 @@ export const consolidateMediaPolling = (items: AssistantTurnItem[]): Consolidate
 
   return result;
 };
-

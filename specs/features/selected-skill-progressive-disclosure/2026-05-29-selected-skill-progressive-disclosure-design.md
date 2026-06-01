@@ -39,38 +39,38 @@
 
 ### 场景 1: 未选择 Skill，自动路由
 
-**Given** 用户没有在首页输入框选择任何 Skill  
-**When** 用户发送一个明显匹配某个 Skill 的请求  
+**Given** 用户没有在首页输入框选择任何 Skill
+**When** 用户发送一个明显匹配某个 Skill 的请求
 **Then** OpenClaw 继续使用原生 Skill 自动路由能力，模型按 description 判断并按需读取匹配 Skill 的 `SKILL.md`。
 
 ### 场景 2: 选择一个 Skill 后发送请求
 
-**Given** 用户选择了一个 Skill  
-**When** 用户发送与该 Skill 匹配的请求  
+**Given** 用户选择了一个 Skill
+**When** 用户发送与该 Skill 匹配的请求
 **Then** 本轮 prompt 只包含该 Skill 的 `id`、`name`、`description`、`location` 等轻量信息，并要求模型在使用前读取对应 `SKILL.md`。
 
 ### 场景 3: 选择多个 Skill 后发送请求
 
-**Given** 用户选择了多个 Skill  
-**When** 用户发送请求  
+**Given** 用户选择了多个 Skill
+**When** 用户发送请求
 **Then** 模型优先从选中的 Skill 中选择最具体、最匹配的一个读取；除非被读取的 Skill 明确要求组合其他 Skill，否则不预先读取多个 `SKILL.md`。
 
 ### 场景 4: 选中 Skill 不匹配请求
 
-**Given** 用户选择了 Skill A  
-**When** 用户发送的请求明显不适合 Skill A，但适合另一个已启用 Skill B  
+**Given** 用户选择了 Skill A
+**When** 用户发送的请求明显不适合 Skill A，但适合另一个已启用 Skill B
 **Then** 模型不应强行使用 Skill A，可回退到 OpenClaw 原生自动路由并使用 Skill B。
 
 ### 场景 5: 继续会话中选择新 Skill
 
-**Given** 用户已经在某个 Cowork 会话中  
-**When** 用户在新一轮消息前选择 Skill  
+**Given** 用户已经在某个 Cowork 会话中
+**When** 用户在新一轮消息前选择 Skill
 **Then** 本轮只注入新选择 Skill 的轻量路由信息；未选择时不刷新或覆盖原 session system prompt。
 
 ### 场景 6: 选择 Kit
 
-**Given** 用户选择一个包含多个 Skill 的 Kit  
-**When** 用户发送请求  
+**Given** 用户选择一个包含多个 Skill 的 Kit
+**When** 用户发送请求
 **Then** Runtime 可继续获得展开后的 Skill ID 用于能力匹配，但 prompt 中只出现这些 Skill 的轻量路由信息，不内联任何 Skill 正文。
 
 ## 3. 功能需求

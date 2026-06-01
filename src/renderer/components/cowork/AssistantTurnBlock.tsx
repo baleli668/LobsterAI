@@ -160,6 +160,7 @@ const AssistantTurnBlock: React.FC<{
   resolveLocalFilePath?: (href: string, text: string) => string | null;
   mapDisplayText?: (value: string) => string;
   onOpenLocalService?: (artifact: Artifact) => void;
+  onForkMessage?: (messageId: string) => void;
   showTypingIndicator?: boolean;
   showCopyButtons?: boolean;
 }> = ({
@@ -168,6 +169,7 @@ const AssistantTurnBlock: React.FC<{
   resolveLocalFilePath,
   mapDisplayText,
   onOpenLocalService,
+  onForkMessage,
   showTypingIndicator = false,
   showCopyButtons = true,
 }) => {
@@ -348,6 +350,7 @@ const AssistantTurnBlock: React.FC<{
                     resolveLocalFilePath={resolveLocalFilePath}
                     mapDisplayText={mapDisplayText}
                     showCopyButton={isLastAssistant}
+                    onFork={isLastAssistant ? onForkMessage : undefined}
                     turnMetadata={isLastAssistant ? (item.message.metadata as CoworkMessageMetadata) : undefined}
                   />
                 );

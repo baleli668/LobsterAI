@@ -2,11 +2,11 @@ import {
   DocumentArrowDownIcon,
   PhotoIcon,
 } from '@heroicons/react/24/outline';
-import React, { useCallback, useEffect, useLayoutEffect, useMemo,useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useDispatch, useSelector } from 'react-redux';
 
-import { normalizeFilePathForDedup, normalizeLocalServiceUrlForDedup, parseFileLinksFromMessage, parseFilePathsFromText, parseLocalServiceUrlsFromText, parseMediaTokensFromText, parseRemoteImageArtifactsFromText, parseToolArtifact, parseToolResultMediaArtifacts, shouldParseFilePathsFromToolResult, stripFileLinksFromText } from '../../services/artifactParser';
+import { dedupeArtifactsForDisplay, normalizeFilePathForDedup, normalizeLocalServiceUrlForDedup, parseFileLinksFromMessage, parseFilePathsFromText, parseLocalServiceUrlsFromText, parseMediaTokensFromText, parseRemoteImageArtifactsFromText, parseToolArtifact, parseToolResultMediaArtifacts, shouldParseFilePathsFromToolResult, stripFileLinksFromText } from '../../services/artifactParser';
 import { coworkService } from '../../services/cowork';
 import { i18nService } from '../../services/i18n';
 import { RootState } from '../../store';
@@ -22,6 +22,7 @@ import {
   activateArtifactFileListTab,
   activateArtifactPreviewTab,
   addArtifact,
+  type ArtifactPreviewTab,
   ArtifactSpecialTab,
   closeArtifactPreviewTab,
   closePanel,
@@ -30,15 +31,13 @@ import {
   selectActivePreviewTab,
   selectIsPanelOpen,
   selectPanelWidth,
-  selectPreviewTabs,
-  selectSessionArtifacts,
   togglePanel,
 } from '../../store/slices/artifactSlice';
 import { setActiveKitIds } from '../../store/slices/kitSlice';
 import { setActiveSkillIds } from '../../store/slices/skillSlice';
 import type { Artifact } from '../../types/artifact';
 import { ArtifactTypeValue, PREVIEWABLE_ARTIFACT_TYPES } from '../../types/artifact';
-import type { CoworkImageAttachment,CoworkMessage, CoworkMessageMetadata } from '../../types/cowork';
+import type { CoworkImageAttachment, CoworkMessage, CoworkMessageMetadata } from '../../types/cowork';
 import { CoworkSessionStatusValue } from '../../types/cowork';
 import type { MediaAttachmentRef } from '../../types/mediaGeneration';
 import { ArtifactPanel, type BrowserAnnotationPayload } from '../artifacts';
@@ -47,7 +46,7 @@ import FileTypeIcon from '../icons/fileTypes/FileTypeIcon';
 import SidebarToggleIcon from '../icons/SidebarToggleIcon';
 import WindowTitleBar from '../window/WindowTitleBar';
 import AssistantTurnBlock, { ContextCompactionDivider } from './AssistantTurnBlock';
-import { type CoworkOpenShareOptionsEventDetail,CoworkUiEvent } from './constants';
+import { type CoworkOpenShareOptionsEventDetail, CoworkUiEvent } from './constants';
 import ContextUsageIndicator from './ContextUsageIndicator';
 import CoworkPromptInput, { type CoworkPromptInputRef } from './CoworkPromptInput';
 import LazyRenderTurn, { clearHeightCache } from './LazyRenderTurn';
@@ -489,6 +488,7 @@ const toAbsolutePathFromCwd = (filePath: string, cwd: string): string => {
 };
 
 const EMPTY_ARTIFACTS: Artifact[] = [];
+const EMPTY_PREVIEW_TABS: ArtifactPreviewTab[] = [];
 
 const CoworkSessionDetail: React.FC<CoworkSessionDetailProps> = ({
   onManageSkills,
@@ -623,6 +623,26 @@ const CoworkSessionDetail: React.FC<CoworkSessionDetailProps> = ({
     void coworkService.compactContext(currentSession.id);
   }, [currentSession?.id]);
 
+  const handleForkMessage = useCallback((messageId: string) => {
+    if (!currentSession?.id) {
+      console.warn('[CoworkFork] message fork was ignored because no session is selected');
+      return;
+    }
+    if (isStreaming || currentSession.status === CoworkSessionStatusValue.Running) {
+      window.dispatchEvent(new CustomEvent('app:showToast', {
+        detail: i18nService.t('coworkForkRunningBlocked'),
+      }));
+      console.warn('[CoworkFork] message fork was rejected because the session is still running');
+      return;
+    }
+
+    console.log(`[CoworkFork] requesting a fork from assistant message ${messageId} in session ${currentSession.id}`);
+    void coworkService.forkSession({
+      sessionId: currentSession.id,
+      forkedFromMessageId: messageId,
+    });
+  }, [currentSession?.id, currentSession?.status, isStreaming]);
+
   // ─── Artifact detection ─────────────────────────────────────────────
   const isPanelOpen = useSelector((state: RootState) => selectIsPanelOpen(state, sessionId));
   const panelWidth = useSelector(selectPanelWidth);
@@ -651,11 +671,15 @@ const CoworkSessionDetail: React.FC<CoworkSessionDetailProps> = ({
   const artifactAddMenuRef = useRef<HTMLDivElement>(null);
   const artifactTabsScrollRef = useRef<HTMLDivElement>(null);
   const contentRowRef = useRef<HTMLDivElement>(null);
-  const sessionArtifacts = useSelector((state: RootState) =>
-    sessionId ? selectSessionArtifacts(state, sessionId) : EMPTY_ARTIFACTS
+  const rawSessionArtifacts = useSelector((state: RootState) =>
+    sessionId ? state.artifact.artifactsBySession[sessionId] ?? EMPTY_ARTIFACTS : EMPTY_ARTIFACTS
+  );
+  const sessionArtifacts = useMemo(
+    () => dedupeArtifactsForDisplay(rawSessionArtifacts),
+    [rawSessionArtifacts],
   );
   const artifactPreviewTabs = useSelector((state: RootState) =>
-    sessionId ? selectPreviewTabs(state, sessionId) : []
+    sessionId ? state.artifact.previewTabsBySession[sessionId] ?? EMPTY_PREVIEW_TABS : EMPTY_PREVIEW_TABS
   );
   const activeArtifactPreviewTab = useSelector((state: RootState) =>
     sessionId ? selectActivePreviewTab(state, sessionId) : null
@@ -2064,6 +2088,7 @@ const CoworkSessionDetail: React.FC<CoworkSessionDetailProps> = ({
                 resolveLocalFilePath={resolveLocalFilePath}
                 mapDisplayText={mapDisplayText}
                 onOpenLocalService={handleOpenLocalServiceArtifact}
+                onForkMessage={remoteManaged ? undefined : handleForkMessage}
                 showTypingIndicator={showTypingIndicator}
                 showCopyButtons={!isStreaming || !isLastTurn}
               />
