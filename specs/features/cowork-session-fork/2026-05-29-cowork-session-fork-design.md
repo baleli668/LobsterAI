@@ -33,11 +33,12 @@ LobsterAI 的架构与 Codex 类似：
 2. 分叉 session 拥有新的 session id，与原 session 后续消息互不影响。
 3. 分叉 session 记录来源关系，可展示 `forkedFromId` / 分叉来源。
 4. 默认能力与 Codex `thread/fork` 对齐：复制 stored history，不复制文件系统。
-5. 在 Git 仓库中支持“在新工作区分叉”，通过 Git worktree 隔离后续文件修改。
+5. 当前落地范围为“派生到本地”；Git worktree “在新工作区分叉”保留为 Phase 2 设计，当前产品决策为暂不实现。
 6. 非 Git 目录仍允许“分叉会话”，但不提供可靠文件状态隔离。
 7. 执行过本地命令的会话仍允许分叉会话，但 UI 明确说明命令副作用不会回滚或复制。
 8. 分叉后继续发送消息时，OpenClaw 使用新的 session key，不污染原 OpenClaw session 历史。
 9. 支持未来扩展到按某条消息或某个 turn 分叉。
+10. 对已经发生 OpenClaw 上下文压缩的会话，分叉后应尽量继承压缩后的模型可见摘要，避免长会话分叉后只依赖最近几条消息。
 
 ### 1.3 非目标
 
@@ -47,6 +48,7 @@ LobsterAI 的架构与 Codex 类似：
 - 不承诺回滚数据库、缓存、外部 API 调用、后台进程、全局包安装等命令副作用。
 - 不自动创建用户不可见的 Git checkpoint commit。
 - 不把原 OpenClaw session key 复用给分叉 session。
+- 不把 OpenClaw 原始 transcript 文件复制为新 LobsterAI session 的运行态来源；第一版只读取 checkpoint 摘要并显式桥接。
 - 不在第一版实现复杂的分叉树可视化。
 - 不在第一版自动清理用户已经手动修改过的 worktree。
 - 不改变现有 Cowork session 的默认创建、继续和删除语义。
@@ -117,6 +119,19 @@ LobsterAI 应采用同一产品语义：
 ```
 
 因此，消息级分叉不是“把文件恢复到该消息时刻”。它只是把新 session 的对话上下文截断到该消息，并在当前文件状态或新 worktree 中继续。
+
+### 2.5 OpenClaw 压缩模型与源码确认
+
+结合 OpenClaw 源码和 gateway schema，LobsterAI 不能把“UI 上的压缩分隔符”和“可用于分叉续写的压缩摘要”混为一谈：
+
+- OpenClaw 在 `src/types/pi-agent-core.d.ts` 中扩展了 `compactionSummary` 角色，字段包括 `summary`、`tokensBefore`、`tokensAfter`、`firstKeptEntryId` 等。该角色属于 assembled/model-visible context 层。
+- OpenClaw 在 `src/gateway/session-compaction-checkpoints.ts` 中持久化 `SessionCompactionCheckpoint`，并最多保留最近 25 个 checkpoint。
+- checkpoint 结构定义在 `src/config/sessions/types.ts` 和 `src/gateway/protocol/schema/sessions.ts`，核心字段包括 `checkpointId`、`reason`、`tokensBefore`、`tokensAfter`、`summary`、`preCompaction`、`postCompaction`。
+- gateway 暴露 `sessions.compaction.list` 和 `sessions.compaction.get`，可根据 session key 读取 checkpoint 列表和单个 checkpoint。
+- gateway 还提供 `sessions.compaction.branch` / `sessions.compaction.restore`，但它们操作 OpenClaw transcript/session store，不等同于 LobsterAI 本地 Cowork session 分叉，第一版不直接采用。
+- `chat.history` 面向普通聊天历史窗口，且 LobsterAI 当前的 `extractGatewayHistoryEntry()` 只接受 `user` / `assistant` / `system`，不会可靠保留 `compactionSummary`。
+
+因此，LobsterAI 分叉压缩会话时应优先从 OpenClaw checkpoint metadata 读取 `summary`，而不是从聊天气泡、`COMPACTION` 分隔符或普通 `chat.history` 文本中推断。
 
 ## 3. 用户场景
 
@@ -324,7 +339,65 @@ OpenClawRuntimeAdapter 当前基于 `sessionId + agentId` 生成 managed session
 
 分叉后第一次继续会话时，现有 `buildOutboundPrompt()` 会在新 OpenClaw session 无 history 时，将本地 `session.messages` 作为 context bridge 注入。这正好匹配会话分叉语义。
 
-### FR-7: Git worktree 创建
+### FR-6A: 压缩摘要桥接
+
+当源会话已经发生 OpenClaw checkpoint compaction 时，仅复制 `cowork_messages` 不足以完整恢复模型上下文。第一版增强需要在分叉时读取最新 checkpoint summary，并将它作为新会话的显式桥接上下文保存下来。
+
+新增内部 metadata kind：
+
+```ts
+export const CoworkForkContextKind = {
+  CompactionSummary: 'fork_compaction_summary',
+} as const;
+```
+
+建议新 session 中写入一条 `system` 消息：
+
+```ts
+{
+  type: 'system',
+  content: '<checkpoint.summary>',
+  metadata: {
+    kind: 'fork_compaction_summary',
+    sourceSessionId,
+    sourceSessionKey,
+    checkpointId,
+    checkpointReason,
+    checkpointCreatedAt,
+    tokensBefore,
+    tokensAfter,
+  }
+}
+```
+
+处理规则：
+
+- 该消息默认不以普通聊天气泡展示；renderer 可以用轻量 divider 或完全隐藏。
+- `CoworkStore.forkSession()` 不直接依赖 OpenClaw gateway。摘要读取由 main process / OpenClawRuntimeAdapter 完成后，以 `forkContextMessages` 形式传入 store。
+- 如果源 session 没有 OpenClaw session key、gateway 未运行、接口不可用、无 checkpoint、或 checkpoint 无 summary，分叉继续走现有最近消息 bridge，不阻断用户。
+- 如果是消息级分叉，只有当 checkpoint 创建时间或 checkpoint 对应序列边界不晚于 `forkedFromMessageId` 时才注入摘要；第一版无法精确映射时保守策略为：只在 session-level fork 或从最新 assistant 消息 fork 时注入摘要。
+- 不把 `compactionSummary` 当作普通 `assistant` 或 `system` 历史复制，不从 `chat.history` 的普通消息窗口推断摘要。
+- 分叉后首轮继续时，`buildBridgePrefix()` 应优先读取 `fork_compaction_summary`，并在最近消息 bridge 之前注入：
+
+```text
+[Compacted context from the source LobsterAI conversation]
+The source conversation was compacted by OpenClaw. Use this summary as prior context:
+<summary>
+```
+
+- 最近消息 bridge 仍保留，用于提供压缩后发生的近端对话和当前分叉点附近上下文。
+
+OpenClaw gateway 读取策略：
+
+1. 使用源 LobsterAI session id 和 agent id 解析 OpenClaw managed session key。
+2. 调用 `sessions.compaction.list({ key })`。
+3. 取按 `createdAt` 最新的 checkpoint，优先使用返回项中的 `summary`。
+4. 如果 list 返回项不含完整 summary，但有 `checkpointId`，再调用 `sessions.compaction.get({ key, checkpointId })`。
+5. 对 summary 做长度上限保护，例如 40k 字符；超出时截断并在 metadata 中记录 `truncated: true`。
+
+该能力是 Phase 1 的增强，不依赖 Git worktree。
+
+### FR-7: Git worktree 创建（Phase 2 Deferred）
 
 新增主进程服务：
 
@@ -355,7 +428,7 @@ interface CoworkWorktreeForkResult {
    - 在新 worktree 中 `git apply --index?` 或普通 `git apply` 应用 diff。
    - 复制 untracked 文件到对应路径。
 
-第一版可先只实现 clean repo worktree，dirty repo 显示提示并要求用户选择“不带未提交改动”或取消。`includeUncommittedChanges` 可作为第二阶段。
+该能力当前不进入实现范围。若后续恢复 Phase 2，可先只实现 clean repo worktree，dirty repo 显示提示并要求用户选择“不带未提交改动”或取消。`includeUncommittedChanges` 可作为第二阶段。
 
 ### FR-8: IPC
 
@@ -684,32 +757,34 @@ worktree 可能包含用户后续修改。删除 session 时默认不删除 work
 - fork session 不复制 pinned 状态。
 - fork session 状态为 `idle`。
 - fork metadata 正确写入。
-- Git capability 检测 clean repo。
-- Git capability 检测 dirty repo。
-- Git capability 检测 non-Git cwd。
+- fork 会话存在 `fork_compaction_summary` 时，`buildBridgePrefix()` 将摘要放在最近消息 bridge 之前。
+- `fork_compaction_summary` 不作为普通聊天气泡展示。
+- checkpoint summary 超长时截断并保留 metadata 标记。
+- Phase 2 恢复时：Git capability 检测 clean repo / dirty repo / non-Git cwd。
 
 ### 8.2 集成测试
 
 - IPC `cowork:session:fork` 成功返回新 session。
 - running session 分叉被拒绝。
-- worktree 模式在 Git repo 中创建新 cwd。
-- worktree 创建失败时不创建半成品 session。
 - session 删除不影响 parent session。
+- 源会话存在 OpenClaw checkpoint summary 时，fork session 写入隐藏摘要桥接消息。
+- OpenClaw checkpoint 接口不可用或返回空 summary 时，fork 仍成功，且回退到最近消息 bridge。
+- 消息级早期分叉不会错误注入晚于分叉点的 checkpoint summary。
+- Phase 2 恢复时：worktree 模式在 Git repo 中创建新 cwd，且 worktree 创建失败时不创建半成品 session。
 
 ### 8.3 手动测试
 
 - 纯讨论会话分叉后继续聊天。
-- 文件修改会话在 Git repo 中 worktree 分叉后继续写文件，确认原工作区不变。
-- 非 Git 目录中 worktree 分叉按钮禁用。
 - 执行过命令的会话分叉时出现风险提示。
 - 分叉 session 首轮继续时，OpenClaw 能读到历史上下文。
-- 删除 worktree fork session 时不自动删除工作区。
+- 对已经产生 checkpoint compaction 的长会话分叉，首轮继续时模型能引用压缩摘要中的关键信息。
+- Phase 2 恢复时：文件修改会话在 Git repo 中 worktree 分叉后继续写文件，确认原工作区不变；非 Git 目录中 worktree 分叉按钮禁用；删除 worktree fork session 时不自动删除工作区。
 
 ## 9. 实施计划
 
-**Goal:** Add Codex-style Cowork session fork support to LobsterAI, with a clear split between conversation history fork and Git worktree workspace isolation.
+**Goal:** Add Codex-style local Cowork session fork support to LobsterAI, while keeping Git worktree workspace isolation as a deferred Phase 2 design.
 
-**Architecture:** Implement fork as a main-process CoworkStore operation that creates a new session and copies persisted messages. Add an optional Git worktree service for workspace isolation in Git repositories. Keep OpenClaw session isolation by using the new LobsterAI session id and existing session-key derivation.
+**Architecture:** Implement fork as a main-process CoworkStore operation that creates a new session and copies persisted messages. For compacted OpenClaw sessions, read checkpoint summary metadata through the gateway and persist it as hidden bridge context in the fork. Keep OpenClaw session isolation by using the new LobsterAI session id and existing session-key derivation. Git worktree isolation is deferred.
 
 **Tech Stack:** Electron IPC, TypeScript, SQLite, React, Redux Toolkit, Git CLI, Vitest
 
@@ -727,11 +802,13 @@ worktree 可能包含用户后续修改。删除 session 时默认不删除 work
 - Add UI menu entry and success flow.
 - Support session-level fork first; message-level fork may be included only if it truncates on stable message/turn boundaries.
 - Sanitize copied message metadata so runtime ids, streaming flags, pending approvals, media task ids, and tool-use bindings do not leak into the fork.
+- Add checkpoint summary bridge for compacted OpenClaw sessions by reading `sessions.compaction.list/get` before creating the fork.
+- Inject `fork_compaction_summary` before the recent-message context bridge on the first turn of the forked session.
 - Add unit tests.
 
 ### Phase 2: 派生到新工作树
 
-第二期目标是对齐 Codex 弹窗中的“派生到新工作树”：
+第二期目标是对齐 Codex 弹窗中的“派生到新工作树”。当前产品决策为暂不实现该阶段，保留设计用于后续恢复：
 
 - Implement `WorktreeForkService`.
 - Add clean Git repo worktree creation.
@@ -763,16 +840,22 @@ worktree 可能包含用户后续修改。删除 session 时默认不删除 work
 - Modify: `src/renderer/components/cowork/CoworkSessionList.tsx`
 - Modify: `src/renderer/components/cowork/CoworkSessionDetail.tsx`
 - Modify: `src/renderer/services/i18n.ts`
-- Create: `src/main/libs/coworkFork/constants.ts`
-- Create: `src/main/libs/coworkFork/worktreeForkService.ts`
-- Create: `src/main/libs/coworkFork/worktreeForkService.test.ts`
-- Create: `src/renderer/components/cowork/CoworkForkSessionModal.tsx`
+- Modify: `src/main/libs/agentEngine/openclawRuntimeAdapter.ts`
+- Modify: `src/main/libs/agentEngine/openclawRuntimeAdapter.test.ts`
+- Modify: `src/renderer/components/cowork/messageDisplayUtils.ts`
+- Deferred if Phase 2 resumes: `src/main/libs/coworkFork/constants.ts`
+- Deferred if Phase 2 resumes: `src/main/libs/coworkFork/worktreeForkService.ts`
+- Deferred if Phase 2 resumes: `src/main/libs/coworkFork/worktreeForkService.test.ts`
+- Deferred if Phase 2 resumes: `src/renderer/components/cowork/CoworkForkSessionModal.tsx`
 - Create: `src/main/coworkForkSession.test.ts`
 
 ## 11. Open Questions
 
-- Worktree path 应放在 app userData 下，还是 repo 相邻 `.lobsterai/worktrees` 下？
-- Dirty repo 第一版是否只允许不带未提交改动，还是直接实现 patch apply？
+- 压缩摘要桥接消息是否完全隐藏，还是在 UI 中显示一条“已继承源会话压缩摘要”的轻量 divider？
+- 消息级早期分叉如何精确判断 checkpoint 是否早于分叉点？是否需要在 LobsterAI 本地记录 checkpoint 与 message sequence 的映射？
+- OpenClaw checkpoint summary 为空但 `compactionSummary` 存在于 transcript/context 时，是否需要额外读取 transcript，还是继续回退到最近消息 bridge？
+- Worktree path 应放在 app userData 下，还是 repo 相邻 `.lobsterai/worktrees` 下？当前 Phase 2 暂缓。
+- Dirty repo 第一版是否只允许不带未提交改动，还是直接实现 patch apply？当前 Phase 2 暂缓。
 - User shell command 是否应该复制到 fork 历史中作为上下文展示，还是像 Codex 一样从 persisted turn view 中过滤？
-- Worktree fork session 删除时，是否需要默认提示清理工作区？
+- Worktree fork session 删除时，是否需要默认提示清理工作区？当前 Phase 2 暂缓。
 - 是否需要在 session list 中显示 fork badge，还是只在 session detail 顶部显示来源？

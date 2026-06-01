@@ -23,6 +23,7 @@ import path from 'path';
 import { Readable } from 'stream';
 import { fileURLToPath, pathToFileURL } from 'url';
 
+import { CoworkSystemMessageKind } from '../common/coworkSystemMessages';
 import type { OpenClawSessionPatch } from '../common/openclawSession';
 import { buildSessionTitleFromInput } from '../common/sessionTitle';
 import { buildScheduledTaskEnginePrompt } from '../scheduledTask/enginePrompt';
@@ -72,7 +73,7 @@ import { AgentManager } from './agentManager';
 import { APP_NAME } from './appConstants';
 import { authQuotaGateStateFromQuota, AuthSubscriptionStatus, createDefaultAuthQuotaGateState, normalizeAuthQuota } from './authQuota';
 import { getAutoLaunchEnabled, isAutoLaunched, setAutoLaunchEnabled } from './autoLaunchManager';
-import { type CoworkMessage, CoworkStore } from './coworkStore';
+import { type CoworkForkContextMessage, type CoworkMessage, CoworkStore } from './coworkStore';
 import { setLanguage, t } from './i18n';
 import { IMGatewayConfig, IMGatewayManager } from './im';
 import {
@@ -5193,12 +5194,33 @@ if (!gotTheLock) {
           return { success: false, error: 'Please stop the current task before forking it.' };
         }
 
+        const forkContextMessages: CoworkForkContextMessage[] = [];
+        const compactionSummary = await runtime.getForkCompactionSummary(sessionId);
+        if (compactionSummary) {
+          forkContextMessages.push({
+            content: compactionSummary.summary,
+            metadata: {
+              kind: CoworkSystemMessageKind.ForkCompactionSummary,
+              sourceSessionId: sessionId,
+              sourceSessionKey: compactionSummary.sessionKey,
+              checkpointId: compactionSummary.checkpointId ?? null,
+              checkpointReason: compactionSummary.reason ?? null,
+              checkpointCreatedAt: compactionSummary.createdAt ?? null,
+              tokensBefore: compactionSummary.tokensBefore ?? null,
+              tokensAfter: compactionSummary.tokensAfter ?? null,
+              truncated: compactionSummary.truncated === true,
+            },
+          });
+          console.log('[CoworkFork] attached a compaction summary bridge to the fork');
+        }
+
         console.log('[CoworkFork] creating a local conversation fork');
         const session = coworkStoreInstance.forkSession({
           sourceSessionId: sessionId,
           forkMode: CoworkForkMode.Conversation,
           forkedFromMessageId: options?.forkedFromMessageId ?? null,
           title: options?.title,
+          contextMessages: forkContextMessages,
         });
         console.log('[CoworkFork] created a local conversation fork successfully');
         return { success: true, session };

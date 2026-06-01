@@ -114,6 +114,56 @@ test('context usage uses checkpoint compaction count', () => {
   expect(usage.latestCompactionCheckpointId).toBe('checkpoint-2');
 });
 
+test('bridge prefix includes hidden fork compaction summaries', () => {
+  const adapter = new OpenClawRuntimeAdapter({} as never, {} as never);
+  const bridge = (adapter as unknown as {
+    buildBridgePrefix: (messages: unknown[], currentPrompt: string) => string;
+  }).buildBridgePrefix([
+    {
+      id: 'summary-1',
+      type: 'system',
+      content: 'The previous session summarized a database migration plan.',
+      timestamp: 1,
+      metadata: {
+        kind: CoworkSystemMessageKind.ForkCompactionSummary,
+        hidden: true,
+      },
+    },
+    {
+      id: 'user-1',
+      type: 'user',
+      content: 'Please implement the migration.',
+      timestamp: 2,
+    },
+  ], 'Continue from the fork.');
+
+  expect(bridge).toContain('[OpenClaw compaction summary from the fork source]');
+  expect(bridge).toContain('database migration plan');
+  expect(bridge).toContain('[Recent visible conversation before the fork]');
+  expect(bridge).toContain('User: Please implement the migration.');
+});
+
+test('bridge prefix can rely only on a hidden fork compaction summary', () => {
+  const adapter = new OpenClawRuntimeAdapter({} as never, {} as never);
+  const bridge = (adapter as unknown as {
+    buildBridgePrefix: (messages: unknown[], currentPrompt: string) => string;
+  }).buildBridgePrefix([
+    {
+      id: 'summary-1',
+      type: 'system',
+      content: 'The compacted context contains the original design constraints.',
+      timestamp: 1,
+      metadata: {
+        kind: CoworkSystemMessageKind.ForkCompactionSummary,
+        hidden: true,
+      },
+    },
+  ], 'Resume.');
+
+  expect(bridge).toContain('[OpenClaw compaction summary from the fork source]');
+  expect(bridge).toContain('original design constraints');
+});
+
 test('context usage resolves historical sessions with targeted lookup', async () => {
   const session = {
     id: 'session-1',

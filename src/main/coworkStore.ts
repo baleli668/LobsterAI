@@ -6,6 +6,7 @@ import os from 'os';
 import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 
+import { CoworkSystemMessageKind } from '../common/coworkSystemMessages';
 import { AgentId, normalizeAgentAvatarIcon } from '../shared/agent';
 import {
   COWORK_MESSAGE_PAGE_SIZE,
@@ -595,6 +596,17 @@ interface CoworkForkSessionOptions {
   workspacePath?: string | null;
   gitBranch?: string | null;
   gitBaseRef?: string | null;
+  contextMessages?: CoworkForkContextMessage[];
+}
+
+export interface CoworkForkContextMessage {
+  content: string;
+  metadata: CoworkMessageMetadata;
+}
+
+interface CoworkForkBoundary {
+  sequence: number | null;
+  createdAt: number;
 }
 
 interface CoworkUserMemoryRow {
@@ -833,11 +845,12 @@ export class CoworkStore {
     const title = options.title?.trim() || `${source.title} (fork)`;
     const cwd = options.cwdOverride ?? source.cwd;
     const forkedFromMessageId = options.forkedFromMessageId?.trim() || null;
-    const messageLimitSequence = forkedFromMessageId
-      ? this.getMessageSequence(options.sourceSessionId, forkedFromMessageId)
+    const forkBoundary = forkedFromMessageId
+      ? this.getMessageForkBoundary(options.sourceSessionId, forkedFromMessageId)
       : null;
+    const messageLimitSequence = forkBoundary?.sequence ?? null;
 
-    if (forkedFromMessageId && messageLimitSequence == null) {
+    if (forkedFromMessageId && (!forkBoundary || forkBoundary.sequence == null)) {
       throw new Error(`Message ${forkedFromMessageId} not found in session ${options.sourceSessionId}`);
     }
 
@@ -882,6 +895,25 @@ export class CoworkStore {
         now,
       );
 
+      for (const contextMessage of options.contextMessages ?? []) {
+        if (!this.shouldCopyForkContextMessage(contextMessage, forkBoundary)) continue;
+        const content = contextMessage.content.trim();
+        if (!content) continue;
+        insertMessage.run(
+          uuidv4(),
+          id,
+          'system',
+          content,
+          JSON.stringify({
+            hidden: true,
+            ...contextMessage.metadata,
+            kind: contextMessage.metadata.kind ?? CoworkSystemMessageKind.ForkCompactionSummary,
+          }),
+          now,
+          null,
+        );
+      }
+
       for (const row of sourceMessages) {
         insertMessage.run(
           uuidv4(),
@@ -902,11 +934,24 @@ export class CoworkStore {
     return forked;
   }
 
-  private getMessageSequence(sessionId: string, messageId: string): number | null {
+  private getMessageForkBoundary(sessionId: string, messageId: string): CoworkForkBoundary | null {
     const row = this.db
-      .prepare('SELECT sequence FROM cowork_messages WHERE session_id = ? AND id = ?')
-      .get(sessionId, messageId) as { sequence?: number | null } | undefined;
-    return row?.sequence ?? null;
+      .prepare('SELECT sequence, created_at FROM cowork_messages WHERE session_id = ? AND id = ?')
+      .get(sessionId, messageId) as { sequence?: number | null; created_at?: number } | undefined;
+    if (!row || typeof row.created_at !== 'number') return null;
+    return {
+      sequence: row.sequence ?? null,
+      createdAt: row.created_at,
+    };
+  }
+
+  private shouldCopyForkContextMessage(
+    message: CoworkForkContextMessage,
+    forkBoundary: CoworkForkBoundary | null,
+  ): boolean {
+    if (!forkBoundary) return true;
+    const checkpointCreatedAt = message.metadata.checkpointCreatedAt;
+    return typeof checkpointCreatedAt === 'number' && checkpointCreatedAt <= forkBoundary.createdAt;
   }
 
   private getForkSourceMessages(sessionId: string, maxSequence: number | null): CoworkMessageRow[] {

@@ -5,6 +5,7 @@ import type {
   CoworkAgentEngine,
   CoworkContextUsage,
   CoworkContinueOptions,
+  CoworkForkCompactionSummary,
   CoworkRuntime,
   CoworkRuntimeEvents,
   CoworkStartOptions,
@@ -95,6 +96,13 @@ export class CoworkEngineRouter extends EventEmitter implements CoworkRuntime {
       throw new Error(`Context compaction is not supported by engine: ${engine}`);
     }
     return this.runtime.compactContext(sessionId);
+  }
+
+  async getForkCompactionSummary(sessionId: string): Promise<CoworkForkCompactionSummary | null> {
+    if (!this.runtime.getForkCompactionSummary) {
+      return null;
+    }
+    return this.runtime.getForkCompactionSummary(sessionId);
   }
 
   stopSession(sessionId: string): void {

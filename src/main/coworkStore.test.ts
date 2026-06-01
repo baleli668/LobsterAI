@@ -20,6 +20,7 @@ vi.mock('electron', () => ({
 // ---------------------------------------------------------------------------
 import BetterSqlite3 from 'better-sqlite3';
 
+import { CoworkSystemMessageKind } from '../common/coworkSystemMessages';
 import { AgentAvatarSvg, DefaultAgentAvatarIcon, encodeAgentAvatarIcon } from '../shared/agent/avatar';
 import { CoworkForkMode } from '../shared/cowork/constants';
 import { CoworkStore } from './coworkStore';
@@ -408,6 +409,63 @@ test('forkSession copies stable history and records fork metadata', () => {
     { content: 'start here', sequence: 1 },
     { content: 'finished answer', sequence: 3 },
   ]);
+});
+
+test('forkSession can persist hidden compaction bridge messages', () => {
+  const sid = 'sess-fork-compacted-source';
+  insertSession(sid);
+  insertMessage('msg-user', sid, 'user', 'continue the plan', null, 1, 1000);
+
+  const fork = store.forkSession({
+    sourceSessionId: sid,
+    contextMessages: [{
+      content: 'The source session was compacted after deciding the implementation plan.',
+      metadata: {
+        kind: CoworkSystemMessageKind.ForkCompactionSummary,
+        sourceSessionId: sid,
+        sourceSessionKey: 'agent:main:session:sess-fork-compacted-source',
+        checkpointId: 'checkpoint-1',
+      },
+    }],
+  });
+
+  expect(fork.messages).toHaveLength(2);
+  const summaryMessage = fork.messages.find((message) => (
+    message.metadata?.kind === CoworkSystemMessageKind.ForkCompactionSummary
+  ));
+  expect(summaryMessage?.type).toBe('system');
+  expect(summaryMessage?.content).toContain('source session was compacted');
+  expect(summaryMessage?.metadata).toMatchObject({
+    hidden: true,
+    kind: CoworkSystemMessageKind.ForkCompactionSummary,
+    sourceSessionId: sid,
+    checkpointId: 'checkpoint-1',
+  });
+  expect(fork.messages.some((message) => message.content === 'continue the plan')).toBe(true);
+});
+
+test('forkSession skips compaction bridge messages newer than the fork point', () => {
+  const sid = 'sess-fork-compaction-boundary';
+  insertSession(sid);
+  insertMessage('msg-early', sid, 'assistant', 'early answer', null, 1, 1000);
+  insertMessage('msg-late', sid, 'assistant', 'late answer', null, 2, 3000);
+
+  const fork = store.forkSession({
+    sourceSessionId: sid,
+    forkedFromMessageId: 'msg-early',
+    contextMessages: [{
+      content: 'This summary was created after the selected fork point.',
+      metadata: {
+        kind: CoworkSystemMessageKind.ForkCompactionSummary,
+        checkpointCreatedAt: 2000,
+      },
+    }],
+  });
+
+  expect(fork.messages.map((message) => message.content)).toEqual(['early answer']);
+  expect(fork.messages.every((message) => (
+    message.metadata?.kind !== CoworkSystemMessageKind.ForkCompactionSummary
+  ))).toBe(true);
 });
 
 test('agent CRUD stores working directory independently', () => {
