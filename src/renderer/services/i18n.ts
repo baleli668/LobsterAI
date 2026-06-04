@@ -1111,7 +1111,7 @@ const translations: Record<LanguageType, Record<string, string>> = {
       '不支持使用磁盘根目录作为工作目录，请选择一个子文件夹（例如 D:\\Projects）。',
     coworkOpenFolder: '打开文件夹',
     coworkSessionStillRunning: '当前任务仍在运行，请等待完成后继续。',
-    coworkImageAttachmentTooLarge: '图片 {name} 超过 {limit} 限制，请压缩后再发送。',
+    coworkImageAttachmentTooLarge: '单张图片 {name} 大小超过 {limit}，请压缩后再发送。',
     coworkImageAttachmentPreviewFailed: '无法生成图片 {name} 的预览，请压缩后再发送。',
     coworkImageAttachmentOriginalMissing: '无法重新编辑该图片消息：原始图片文件不存在或不可读取。',
     coworkContextUsageUnknown: '上下文使用量暂不可用',
@@ -1138,6 +1138,8 @@ const translations: Record<LanguageType, Record<string, string>> = {
     coworkErrorAuthInvalid: 'API 密钥无效或已过期，请在设置中检查并更新您的 API 密钥。',
     coworkErrorInsufficientBalance: 'API 余额不足，请充值后重试。',
     coworkErrorInputTooLong: '输入内容过长，超出模型上下文限制，请缩短对话内容后重试。',
+    coworkErrorMessageTooLarge:
+      '本次消息过大，请减少附件、压缩图片或拆分提交。（单次整体需小于约 30MB）',
     coworkErrorCouldNotProcessPdf: '无法处理 PDF 文件。请尝试将 PDF 转换为文本格式后重新发送。',
     coworkErrorModelNotFound: '请求的模型不存在或不可用，请在设置中检查模型配置。',
     coworkGatewaySessionSyncTimeout: 'OpenClaw 会话同步超时，消息尚未发送。请稍后重试或重启 OpenClaw Runtime。',
@@ -3504,7 +3506,7 @@ const translations: Record<LanguageType, Record<string, string>> = {
       'Drive root directories are not supported as working directories. Please select a subfolder (e.g. D:\\Projects).',
     coworkOpenFolder: 'Open folder',
     coworkSessionStillRunning: 'The current task is still running. Please wait for it to finish.',
-    coworkImageAttachmentTooLarge: 'Image {name} exceeds the {limit} limit. Compress it before sending.',
+    coworkImageAttachmentTooLarge: 'Image {name} is larger than {limit}. Compress it before sending.',
     coworkImageAttachmentPreviewFailed: 'Could not create a preview for image {name}. Compress it before sending.',
     coworkImageAttachmentOriginalMissing: 'Cannot re-edit this image message because the original image file is missing or unreadable.',
     coworkContextUsageUnknown: 'Context usage is unavailable',
@@ -3534,6 +3536,8 @@ const translations: Record<LanguageType, Record<string, string>> = {
     coworkErrorInsufficientBalance: 'Insufficient API balance. Please top up and try again.',
     coworkErrorInputTooLong:
       'Input too long, exceeding model context limit. Please shorten the conversation and try again.',
+    coworkErrorMessageTooLarge:
+      'This message is too large. Reduce attachments, compress images, or split it up. (Keep each message under about 30 MB.)',
     coworkErrorCouldNotProcessPdf:
       'Unable to process the PDF file. Please try converting the PDF to text format and resend.',
     coworkErrorModelNotFound:

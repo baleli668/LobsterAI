@@ -18,7 +18,10 @@ import {
 } from '../../../common/coworkSystemMessages';
 import { CoworkSelectedTextSource } from '../../../shared/cowork/selectedText';
 import {
+  buildOpenClawChatSendPayloadTooLargeError,
+  estimateOpenClawChatSendFrameBytes,
   normalizeOpenClawRuntimeErrorMessage,
+  OPENCLAW_CHAT_SEND_PAYLOAD_SAFE_LIMIT_BYTES,
   OpenClawRuntimeAdapter,
   pickPersistedAssistantSegment,
   resolveToolEventIsError,
@@ -77,6 +80,43 @@ test('normalizeOpenClawRuntimeErrorMessage maps empty SSE parser errors', () => 
 
 test('normalizeOpenClawRuntimeErrorMessage keeps unrelated errors unchanged', () => {
   expect(normalizeOpenClawRuntimeErrorMessage('upstream 502')).toBe('upstream 502');
+});
+
+test('estimateOpenClawChatSendFrameBytes measures the full RPC frame as UTF-8 JSON', () => {
+  const params = {
+    sessionKey: 'agent:main:lobsterai:session-1',
+    message: '分析这张图',
+    deliver: false,
+    idempotencyKey: 'run-1',
+    attachments: [{
+      type: 'image',
+      mimeType: 'image/png',
+      content: 'A'.repeat(16),
+    }],
+  };
+
+  const expected = Buffer.byteLength(JSON.stringify({
+    id: 'estimate',
+    method: 'chat.send',
+    params,
+  }), 'utf8');
+
+  expect(estimateOpenClawChatSendFrameBytes(params)).toBe(expected);
+  expect(expected).toBeGreaterThan(params.attachments[0].content.length);
+});
+
+test('buildOpenClawChatSendPayloadTooLargeError includes a stable classification marker', () => {
+  const error = buildOpenClawChatSendPayloadTooLargeError({
+    estimatedFrameBytes: OPENCLAW_CHAT_SEND_PAYLOAD_SAFE_LIMIT_BYTES + 1,
+    safeLimitBytes: OPENCLAW_CHAT_SEND_PAYLOAD_SAFE_LIMIT_BYTES,
+    attachmentCount: 4,
+    attachmentBase64Bytes: 36_335_652,
+  });
+
+  expect(error.message).toContain('chat.send payload too large');
+  expect(error.message).toContain(String(OPENCLAW_CHAT_SEND_PAYLOAD_SAFE_LIMIT_BYTES + 1));
+  expect(error.message).toContain('attachments 4');
+  expect(error.message).toContain('attachment base64 bytes 36335652');
 });
 
 test('outbound prompt includes selected assistant text as quoted reference data', async () => {

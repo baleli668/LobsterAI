@@ -85,9 +85,82 @@ const FORK_COMPACTION_SUMMARY_MAX_CHARS = 40_000;
 const GATEWAY_READY_TIMEOUT_MS = 60_000;
 const FINAL_HISTORY_SYNC_LIMIT = 50;
 const CHANNEL_SESSION_DISCOVERY_LIMIT = 200;
+export const OPENCLAW_CHAT_SEND_PAYLOAD_LIMIT_BYTES = 30 * 1000 * 1000;
+export const OPENCLAW_CHAT_SEND_PAYLOAD_SAFETY_MARGIN_BYTES = 500 * 1000;
+export const OPENCLAW_CHAT_SEND_PAYLOAD_SAFE_LIMIT_BYTES =
+  OPENCLAW_CHAT_SEND_PAYLOAD_LIMIT_BYTES - OPENCLAW_CHAT_SEND_PAYLOAD_SAFETY_MARGIN_BYTES;
+const WebSocketCloseCode = {
+  MessageTooBig: 1009,
+} as const;
 const MediaGenerationToolAction = {
   Status: 'status',
 } as const;
+
+type OpenClawChatSendFrameEstimate = {
+  id: string;
+  method: string;
+  params: unknown;
+};
+
+type ChatSendAttachmentLike = {
+  content?: string;
+};
+
+export function estimateOpenClawChatSendFrameBytes(params: unknown): number {
+  const frame: OpenClawChatSendFrameEstimate = {
+    id: 'estimate',
+    method: 'chat.send',
+    params,
+  };
+  return Buffer.byteLength(JSON.stringify(frame), 'utf8');
+}
+
+function sumAttachmentBase64Bytes(attachments?: ChatSendAttachmentLike[]): number {
+  return (attachments ?? []).reduce((total, attachment) => {
+    return total + (typeof attachment.content === 'string' ? attachment.content.length : 0);
+  }, 0);
+}
+
+export function buildOpenClawChatSendPayloadTooLargeError(options: {
+  estimatedFrameBytes: number;
+  safeLimitBytes: number;
+  attachmentCount: number;
+  attachmentBase64Bytes: number;
+}): Error {
+  return new Error(
+    `chat.send payload too large: estimated ${options.estimatedFrameBytes} bytes exceeds safe limit `
+    + `${options.safeLimitBytes} bytes; attachments ${options.attachmentCount}; attachment base64 bytes `
+    + `${options.attachmentBase64Bytes}`,
+  );
+}
+
+function assertOpenClawChatSendPayloadWithinLimit(
+  sessionId: string,
+  params: unknown,
+  attachments?: ChatSendAttachmentLike[],
+): void {
+  const estimatedFrameBytes = estimateOpenClawChatSendFrameBytes(params);
+  if (estimatedFrameBytes <= OPENCLAW_CHAT_SEND_PAYLOAD_SAFE_LIMIT_BYTES) {
+    return;
+  }
+
+  const attachmentCount = attachments?.length ?? 0;
+  const attachmentBase64Bytes = sumAttachmentBase64Bytes(attachments);
+  console.warn(
+    '[OpenClawRuntime] chat.send payload exceeded safe limit.',
+    `Session ${sessionId}.`,
+    `Estimated ${estimatedFrameBytes} bytes.`,
+    `Safe limit ${OPENCLAW_CHAT_SEND_PAYLOAD_SAFE_LIMIT_BYTES} bytes.`,
+    `Attachments ${attachmentCount}.`,
+    `Attachment base64 total ${attachmentBase64Bytes} bytes.`,
+  );
+  throw buildOpenClawChatSendPayloadTooLargeError({
+    estimatedFrameBytes,
+    safeLimitBytes: OPENCLAW_CHAT_SEND_PAYLOAD_SAFE_LIMIT_BYTES,
+    attachmentCount,
+    attachmentBase64Bytes,
+  });
+}
 
 function validateRuntimeImageAttachments(
   imageAttachments?: CoworkImageAttachment[],
@@ -3147,16 +3220,22 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
       if (attachments) {
         console.log('[OpenClawRuntime] chat.send with attachments:', attachments.length, 'images,', attachments.map(a => ({ type: a.type, mimeType: a.mimeType, contentLength: a.content?.length ?? 0 })));
       }
-      const chatSendStartMs = Date.now();
-      firstResponseTiming.chatSendStartedAtMs = chatSendStartMs;
-      const sendResult = await client.request<Record<string, unknown>>('chat.send', {
+      const chatSendParams = {
         sessionKey,
         message: outboundMessage,
         deliver: false,
         idempotencyKey: runId,
         ...(runCwd ? { cwd: runCwd } : {}),
         ...(attachments ? { attachments } : {}),
-      }, { timeoutMs: 90_000 });
+      };
+      assertOpenClawChatSendPayloadWithinLimit(sessionId, chatSendParams, attachments);
+      const chatSendStartMs = Date.now();
+      firstResponseTiming.chatSendStartedAtMs = chatSendStartMs;
+      const sendResult = await client.request<Record<string, unknown>>(
+        'chat.send',
+        chatSendParams,
+        { timeoutMs: 90_000 },
+      );
       const chatSendElapsedMs = Date.now() - chatSendStartMs;
       firstResponseTiming.chatSendAckAtMs = Date.now();
       console.log(
@@ -3507,7 +3586,10 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
         }
 
         console.warn('[OpenClawRuntime] gateway WS disconnected — code:', _code, 'reason:', reason);
-        const disconnectedError = new Error(reason || 'OpenClaw gateway client disconnected');
+        const disconnectedMessage = _code === WebSocketCloseCode.MessageTooBig
+          ? (reason || 'gateway closed (1009):')
+          : (reason || 'OpenClaw gateway client disconnected');
+        const disconnectedError = new Error(disconnectedMessage);
         const activeSessionIds = Array.from(this.activeTurns.keys());
         activeSessionIds.forEach((sessionId) => {
           this.store.updateSession(sessionId, { status: 'error' });

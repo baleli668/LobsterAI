@@ -698,6 +698,13 @@ const CoworkPromptInput = React.forwardRef<CoworkPromptInputRef, CoworkPromptInp
             base64Data: extracted.base64Data,
           });
           if (!sizeValidation.ok) {
+            console.warn('[CoworkPromptInput] image attachment exceeded single-file limit:', {
+              name: attachment.name,
+              mimeType: extracted.mimeType,
+              sizeBytes: sizeValidation.sizeBytes,
+              maxBytes: sizeValidation.maxBytes,
+              base64Length: extracted.base64Data.length,
+            });
             showToast(
               i18nService.t('coworkImageAttachmentTooLarge')
                 .replace('{name}', attachment.name)
