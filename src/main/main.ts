@@ -62,6 +62,10 @@ import {
   type CoworkSelectedTextSnippet,
   normalizeCoworkSelectedTextSnippets,
 } from '../shared/cowork/selectedText';
+import {
+  DataMigrationIpc,
+  type DataMigrationLastRestoreResult,
+} from '../shared/dataMigration/constants';
 import { DialogIpc } from '../shared/dialog/constants';
 import {
   HtmlShareAccessMode,
@@ -173,6 +177,15 @@ import {
   probeCoworkModelReadiness,
 } from './libs/coworkUtil';
 import {
+  buildDataMigrationBackupFileName,
+  consumeLastRestoreResultSync,
+  createMigrationArchive,
+  ensureTarGzFileName,
+  inspectMigrationArchive,
+  performPendingDataMigrationRestoreSync,
+  writePendingRestoreRequestSync,
+} from './libs/dataMigration/dataMigrationService';
+import {
   getHtmlSharePublicBaseUrl,
   getKitStoreUrl,
   getPortalTasksUrl,
@@ -243,6 +256,7 @@ import { migrateMainAgentWorkspace } from './libs/openclawWorkspaceMigration';
 import { isHiddenUserPluginId } from './libs/pluginManager';
 import { ensurePythonRuntimeReady } from './libs/pythonRuntime';
 import { serializeForLog } from './libs/sanitizeForLog';
+import { SqliteBackupTrigger } from './libs/sqliteBackup/constants';
 import { SqliteBackupManager } from './libs/sqliteBackup/sqliteBackupManager';
 import { runStartupCacheWarmup } from './libs/startupCacheWarmup';
 import {
@@ -1058,7 +1072,20 @@ const configureUserDataPath = (): void => {
 };
 
 configureUserDataPath();
+let startupDataMigrationRestoreResult: DataMigrationLastRestoreResult | null = null;
+try {
+  startupDataMigrationRestoreResult = performPendingDataMigrationRestoreSync({
+    userDataPath: app.getPath('userData'),
+    rollbackRootPath: path.join(app.getPath('appData'), `${APP_NAME}-migration-rollbacks`),
+  });
+} catch (error) {
+  console.error('[DataMigration] pending restore failed before logger initialization:', error);
+}
 initLogger();
+if (startupDataMigrationRestoreResult) {
+  const status = startupDataMigrationRestoreResult.status;
+  console.log(`[DataMigration] pending restore finished with status ${status}`);
+}
 
 const isDev = process.env.NODE_ENV === 'development';
 const isLinux = process.platform === 'linux';
@@ -2924,9 +2951,18 @@ if (!gotTheLock) {
     try {
       if (mainWindow.isMinimized()) mainWindow.restore();
       if (!mainWindow.isVisible()) mainWindow.show();
+      mainWindow.moveTop();
       if (!mainWindow.isFocused()) mainWindow.focus();
       if (process.platform === 'darwin') {
         app.focus({ steal: true });
+      }
+      if (process.platform === 'win32') {
+        const wasAlwaysOnTop = mainWindow.isAlwaysOnTop();
+        mainWindow.setAlwaysOnTop(true, 'normal');
+        mainWindow.show();
+        mainWindow.focus();
+        mainWindow.setAlwaysOnTop(wasAlwaysOnTop, 'normal');
+        mainWindow.flashFrame(false);
       }
       console.log(`[Main] focused main window after ${reason}`);
     } catch (error) {
@@ -4235,6 +4271,7 @@ if (!gotTheLock) {
     let localCallback: Awaited<ReturnType<typeof startAuthLocalCallback>> | null = null;
 
     try {
+      console.log('[Auth] starting browser login with local callback server');
       localCallback = await startAuthLocalCallback({
         onCode: code => {
           authCallbackRouter.handleAuthCode(code);
@@ -4250,6 +4287,7 @@ if (!gotTheLock) {
         redirect_uri: appendCallbackReturnTo(localCallback.redirectUri, returnTo),
         state: localCallback.state,
       });
+      console.log('[Auth] opening portal login with local callback redirect');
       await shell.openExternal(finalUrl);
       return { success: true };
     } catch (error) {
@@ -4873,6 +4911,100 @@ if (!gotTheLock) {
         status: manager.getStatus(),
         originalPath: manager.getConfigPath(),
         error: error instanceof Error ? error.message : 'Failed to repair OpenClaw gateway state',
+      };
+    }
+  });
+
+  ipcMain.handle(DataMigrationIpc.Backup, async event => {
+    const ownerWindow = BrowserWindow.fromWebContents(event.sender);
+    try {
+      const saveOptions = {
+        title: t('dataMigrationBackupDialogTitle'),
+        defaultPath: path.join(app.getPath('downloads'), buildDataMigrationBackupFileName()),
+        filters: [{ name: t('dataMigrationBackupArchiveFilter'), extensions: ['gz'] }],
+      };
+      const saveResult = ownerWindow
+        ? await dialog.showSaveDialog(ownerWindow, saveOptions)
+        : await dialog.showSaveDialog(saveOptions);
+      if (saveResult.canceled || !saveResult.filePath) {
+        return { success: true, canceled: true };
+      }
+
+      const outputPath = ensureTarGzFileName(saveResult.filePath);
+      const backupManager = sqliteBackupManager ?? new SqliteBackupManager(app.getPath('userData'));
+      const sqliteRecord = await backupManager.createBackup({
+        db: getStore().getDatabase(),
+        trigger: SqliteBackupTrigger.Manual,
+      });
+      const sqliteSnapshotPath = path.join(
+        backupManager.getPaths().snapshotsDir,
+        sqliteRecord.fileName,
+      );
+
+      const archive = await createMigrationArchive({
+        userDataPath: app.getPath('userData'),
+        outputPath,
+        sqliteSnapshotPath,
+        archiveKind: 'backup',
+      });
+      return {
+        success: true,
+        canceled: false,
+        path: archive.outputPath,
+        sizeBytes: archive.sizeBytes,
+      };
+    } catch (error) {
+      console.error('[DataMigration] backup failed:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to back up LobsterAI data',
+      };
+    }
+  });
+
+  ipcMain.handle(DataMigrationIpc.Restore, async event => {
+    const ownerWindow = BrowserWindow.fromWebContents(event.sender);
+    try {
+      const openOptions = {
+        title: t('dataMigrationRestoreDialogTitle'),
+        properties: ['openFile'] as 'openFile'[],
+        filters: [
+          { name: t('dataMigrationBackupArchiveFilter'), extensions: ['gz', 'tgz', 'tar'] },
+          { name: t('dataMigrationAllFilesFilter'), extensions: ['*'] },
+        ],
+      };
+      const openResult = ownerWindow
+        ? await dialog.showOpenDialog(ownerWindow, openOptions)
+        : await dialog.showOpenDialog(openOptions);
+      if (openResult.canceled || openResult.filePaths.length === 0) {
+        return { success: true, canceled: true };
+      }
+
+      const archivePath = openResult.filePaths[0];
+      await inspectMigrationArchive(archivePath);
+      writePendingRestoreRequestSync(app.getPath('userData'), archivePath);
+      app.relaunch();
+      app.quit();
+      return { success: true, scheduledRestart: true };
+    } catch (error) {
+      console.error('[DataMigration] restore scheduling failed:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to import LobsterAI data backup',
+      };
+    }
+  });
+
+  ipcMain.handle(DataMigrationIpc.GetLastRestoreResult, async () => {
+    try {
+      return {
+        success: true,
+        result: consumeLastRestoreResultSync(app.getPath('userData')),
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to read data migration result',
       };
     }
   });
